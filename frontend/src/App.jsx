@@ -2,338 +2,318 @@
 import React, { useEffect, useRef, useState } from "react";
 import { io as ioClient } from "socket.io-client";
 
-// CONFIG
-// Use environment variable or fallback to localhost
-const SERVER_URL = "https://socketio-testing-chatbox.onrender.com";
-const NOTIFICATION_SOUND = "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3";
+// --- UTILS ---
+function generateId() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
 
-// --- HELPERS ---
-const generateId = () => `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-const formatTime = (iso) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+function formatTime(dateInput) {
+  const date = new Date(dateInput);
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+// Notification sound URL (you can replace)
+const NOTIFICATION_SOUND = "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3";
 
 export default function App() {
   // STATE
-  const [inputMsg, setInputMsg] = useState("");
-  const [messages, setMessages] = useState([]); // List of { id, message, ... }
+  const [message, setMessage] = useState("");
+  const [messageList, setMessageList] = useState([]);
   const [connected, setConnected] = useState(false);
-  const [typingUsers, setTypingUsers] = useState({}); // Map<socketId, name>
-  const [onlineCount, setOnlineCount] = useState(1);
-  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [typingUsers, setTypingUsers] = useState({});
+  const [totalUsers, setTotalUsers] = useState(1);
 
   // REFS
   const socketRef = useRef(null);
-  const scrollRef = useRef(null);
-  const audioRef = useRef(new Audio(NOTIFICATION_SOUND));
-  const myName = useRef(`User-${Math.floor(Math.random() * 1000)}`);
+  const messagesEndRef = useRef(null);
+  const audioRef = useRef(null);
+  const pendingRef = useRef(new Map()); // optimistic messages not yet confirmed by server (keyed by id)
+  const clientDisplayName = useRef(`User-${Math.random().toString(36).slice(2,6)}`);
 
-  // --- INITIALIZATION ---
+  // init audio once
   useEffect(() => {
-    // Initialize Socket
-    socketRef.current = ioClient(SERVER_URL, {
+    audioRef.current = new Audio(NOTIFICATION_SOUND);
+    audioRef.current.preload = "auto";
+  }, []);
+
+  // --- SOCKET CONNECTION ---
+  useEffect(() => {
+    const SOCKET_URL = "https://socketio-testing-chatbox.onrender.com"; // change if needed
+
+    const socket = ioClient(SOCKET_URL, {
       transports: ["websocket"],
-      reconnectionAttempts: 10,
+      reconnectionAttempts: 999,
+      reconnectionDelay: 1000,
     });
+    socketRef.current = socket;
 
-    const socket = socketRef.current;
-
-    // 1. Connection Events
     socket.on("connect", () => {
+      console.log("socket connected", socket.id);
       setConnected(true);
-      socket.emit("identify", { displayName: myName.current });
-    });
-    
-    socket.on("disconnect", () => setConnected(false));
-    
-    socket.on("users_count", (data) => setOnlineCount(data.total));
-
-    // 2. Message Handling
-    socket.on("history", (historyMsg) => {
-      setMessages(historyMsg); 
+      // Inform server of our name (optional)
+      socket.emit("identify", { displayName: clientDisplayName.current });
     });
 
-    socket.on("receive_message", (msg) => {
-      setMessages((prev) => {
-        // Prevent duplicates using a Map
-        const map = new Map(prev.map(m => [m.id, m]));
-        map.set(msg.id, msg);
+    socket.on("disconnect", (reason) => {
+      console.log("socket disconnected", reason);
+      setConnected(false);
+      setTypingUsers({});
+    });
+
+    // Server history (array)
+    socket.on("history", (history = []) => {
+      // Merge server history with any pending local optimistic messages
+      setMessageList((prev) => {
+        const merged = new Map();
+        // add server history first
+        history.forEach((m) => {
+          if (m && m.id) merged.set(m.id, m);
+        });
+        // then add previous existing messages (in case there are local-only messages)
+        prev.forEach((m) => {
+          if (m && m.id && !merged.has(m.id)) merged.set(m.id, m);
+        });
+        // ensure pending optimistic messages (if any) are present
+        pendingRef.current.forEach((m, id) => {
+          if (!merged.has(id)) merged.set(id, m);
+        });
+        return Array.from(merged.values());
+      });
+    });
+
+    // Receive message broadcast
+    socket.on("receive_message", (data) => {
+      if (!data || !data.id) return;
+      setMessageList((prev) => {
+        // put messages into a map key'd by id to dedupe & keep order
+        const map = new Map();
+        prev.forEach((m) => map.set(m.id, m));
+        // insert/overwrite with incoming server message
+        map.set(data.id, data);
         return Array.from(map.values());
       });
 
-      // Play sound if it's not me
-      if (msg.socketId !== socket.id && soundEnabled) {
-        audioRef.current.play().catch(() => {});
+      // If this message was pending, remove from pending
+      if (pendingRef.current.has(data.id)) {
+        pendingRef.current.delete(data.id);
+      }
+
+      // Play sound only if message is from someone else
+      if (data.socketId && data.socketId !== socketRef.current?.id) {
+        try {
+          // browsers require user interaction for autoplay; catch any error silently
+          audioRef.current?.play().catch(() => {});
+        } catch (e) {}
       }
     });
 
-    // 3. Typing Indicators
-    socket.on("user_typing", ({ socketId, typing, displayName }) => {
+    // Typing events
+    socket.on("user_typing", (payload) => {
+      // payload: { socketId, typing, displayName }
+      if (!payload || !payload.socketId) return;
+      if (payload.socketId === socketRef.current?.id) return; // ignore our own
       setTypingUsers((prev) => {
         const next = { ...prev };
-        if (typing) next[socketId] = displayName;
-        else delete next[socketId];
+        if (payload.typing) next[payload.socketId] = payload.displayName || "Someone";
+        else delete next[payload.socketId];
         return next;
       });
     });
 
+    socket.on("users_count", (payload) => {
+      if (payload && typeof payload.total === "number") setTotalUsers(payload.total);
+    });
+
+    // debug errors
+    socket.on("connect_error", (err) => console.warn("connect_error:", err?.message || err));
+    socket.on("error", (err) => console.warn("socket_error:", err));
+
     return () => {
       socket.disconnect();
+      socketRef.current = null;
     };
-  }, [soundEnabled]);
+  }, []);
 
-  // Auto-Scroll Logic
+  // Auto scroll on messages or typing changes
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [messages, typingUsers]);
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messageList, typingUsers]);
 
-  // --- ACTIONS ---
-  const handleTyping = (e) => {
-    setInputMsg(e.target.value);
-    
-    // Emit typing event (debounced)
-    if (socketRef.current?.connected) {
-      socketRef.current.emit("typing", true);
-      
-      clearTimeout(window.typingTimer);
-      window.typingTimer = setTimeout(() => {
-        socketRef.current.emit("typing", false);
-      }, 1000);
-    }
+  // Typing debounce
+  const typingTimeoutRef = useRef(null);
+  const handleTyping = () => {
+    if (!socketRef.current?.connected) return;
+    socketRef.current.emit("typing", { typing: true, displayName: clientDisplayName.current });
+
+    clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(() => {
+      socketRef.current?.emit("typing", { typing: false });
+    }, 1200);
   };
 
-  const sendMessage = (e) => {
-    e?.preventDefault();
-    if (!inputMsg.trim() || !socketRef.current) return;
-
-    const tempId = generateId();
-    const payload = {
-      id: tempId,
-      message: inputMsg,
+  // Send message (optimistic)
+  const sendMessage = () => {
+    if (!message.trim() || !socketRef.current) return;
+    const id = generateId();
+    const msgData = {
+      id,
+      message: message.trim(),
       time: new Date().toISOString(),
       socketId: socketRef.current.id,
-      displayName: myName.current,
+      displayName: clientDisplayName.current,
       avatar: `https://api.dicebear.com/7.x/notionists/svg?seed=${socketRef.current.id}&backgroundColor=b6e3f4,c0aede,d1d4f9`
     };
 
-    // Optimistic Update (Show immediately)
-    setMessages(prev => [...prev, payload]);
-    
-    // Send to Server
-    socketRef.current.emit("send_message", payload);
-    socketRef.current.emit("typing", false);
+    // optimistic update + mark as pending
+    pendingRef.current.set(id, msgData);
+    setMessageList((prev) => {
+      const map = new Map();
+      prev.forEach((m) => map.set(m.id, m));
+      map.set(id, msgData);
+      return Array.from(map.values());
+    });
 
-    setInputMsg("");
+    // emit with optional acknowledgement
+    socketRef.current.emit("send_message", msgData, (ack) => {
+      // ack may contain { ok: true, id } if server sends it
+      if (ack && ack.id) {
+        // server confirmed storage; if server modifies message we rely on receive_message to sync
+        pendingRef.current.delete(ack.id);
+      }
+    });
+
+    // stop typing state
+    socketRef.current.emit("typing", { typing: false });
+
+    setMessage("");
   };
 
-  const typingList = Object.values(typingUsers);
+  // helpers
+  const otherUsersCount = Math.max(0, totalUsers - 1);
+  const typingArr = Object.values(typingUsers);
 
   return (
     <div className="app-container">
-      <style>{STYLES}</style>
-      
+      <style>{`
+        :root {
+          --primary: #4f46e5;
+          --primary-light: #e0e7ff;
+          --bg: #f3f4f6;
+          --chat-bg: #ffffff;
+          --mine-bubble: #4f46e5;
+          --other-bubble: #f3f4f6;
+          --text-main: #1f2937;
+          --text-sub: #6b7280;
+        }
+        body { margin: 0; font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; background: var(--bg); }
+        .app-container { display:flex; justify-content:center; align-items:center; min-height:100dvh; padding:20px; box-sizing:border-box; }
+        .chat-card { width:100%; max-width:500px; height:85vh; background:var(--chat-bg); border-radius:24px; box-shadow:0 20px 50px -10px rgba(0,0,0,0.1); display:flex; flex-direction:column; overflow:hidden; position:relative;}
+        .chat-header { padding:16px 20px; background: rgba(255,255,255,0.9); backdrop-filter: blur(10px); border-bottom:1px solid #f0f0f0; display:flex; justify-content:space-between; align-items:center; z-index:10;}
+        .status-dot { height:8px; width:8px; border-radius:50%; display:inline-block; margin-right:6px;}
+        .online { background:#22c55e; box-shadow:0 0 8px #22c55e; }
+        .offline { background:#ef4444; }
+        .messages-area { flex:1; padding:20px; overflow-y:auto; background-image: radial-gradient(#e5e7eb 1px, transparent 1px); background-size:20px 20px; display:flex; flex-direction:column; gap:12px; }
+        .message-group { display:flex; gap:10px; max-width:80%; animation:slideIn .2s ease; }
+        .message-group.mine { align-self:flex-end; flex-direction:row-reverse; }
+        .avatar { width:32px; height:32px; border-radius:50%; background:#ddd; border:2px solid white; flex-shrink:0; }
+        .bubble { padding:10px 14px; border-radius:18px; position:relative; font-size:14px; line-height:1.4; box-shadow:0 2px 5px rgba(0,0,0,0.05); }
+        .mine .bubble { background:var(--mine-bubble); color:white; border-bottom-right-radius:4px; }
+        .other .bubble { background:var(--other-bubble); color:var(--text-main); border-bottom-left-radius:4px; }
+        .meta { font-size:10px; margin-top:4px; opacity:0.7; text-align:right; }
+        .typing-indicator { font-size:12px; color:var(--text-sub); padding:0 24px 8px; height:20px; }
+        .input-area { padding:16px; background:white; border-top:1px solid #f3f4f6; display:flex; gap:10px; align-items:center; }
+        .msg-input { flex:1; background:#f9fafb; border:1px solid #e5e7eb; padding:12px 16px; border-radius:99px; outline:none; font-size:14px; transition:all .2s; }
+        .msg-input:focus { border-color:var(--primary); box-shadow:0 0 0 3px var(--primary-light); background:white; }
+        .send-btn { background:var(--primary); color:white; border:none; width:44px; height:44px; border-radius:50%; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:transform .1s; }
+        .send-btn:active { transform:scale(.95); }
+        @keyframes slideIn { from { opacity:0; transform:translateY(6px);} to { opacity:1; transform:translateY(0);} }
+        @media (max-width:600px) { .app-container { padding:0; } .chat-card { height:100dvh; max-width:100%; border-radius:0; } }
+      `}</style>
       <div className="chat-card">
-        {/* HEADER */}
         <div className="chat-header">
-          <div className="header-info">
-            <h2>Startup Discussion Group</h2>
-            <div className="status-line">
-              <span className={`dot ${connected ? "online" : "offline"}`} />
-              <span>{connected ? `${onlineCount} Online` : "Reconnecting..."}</span>
+          <div>
+            <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#111" }}>Public Lounge</h2>
+            <div style={{ fontSize: 12, color: "#666", marginTop: 2 }}>
+              <span className={`status-dot ${connected ? "online" : "offline"}`} />
+              {connected ? `${otherUsersCount} others online` : "Connecting..."}
             </div>
           </div>
-          <button 
-            onClick={() => setSoundEnabled(!soundEnabled)}
-            className="icon-btn"
-            title={soundEnabled ? "Mute" : "Unmute"}
-          >
-            {soundEnabled ? "🔔" : "🔕"}
-          </button>
+          {socketRef.current?.id && (
+            <img
+              src={`https://api.dicebear.com/7.x/notionists/svg?seed=${socketRef.current.id}&backgroundColor=b6e3f4,c0aede,d1d4f9`}
+              alt="My Avatar"
+              style={{ width: 36, height: 36, borderRadius: "50%" }}
+            />
+          )}
         </div>
 
-        {/* MESSAGES AREA */}
-        <div className="messages-area">
-          {messages.length === 0 && (
-             <div className="empty-state">No messages yet. Be the first! 👋</div>
+        <div className="messages-area" aria-live="polite">
+          {messageList.length === 0 && (
+            <div style={{ textAlign: "center", marginTop: 40, color: "#9ca3af", fontSize: 14 }}>
+              No messages yet. Say Hi! 👋
+            </div>
           )}
-          
-          {messages.map((msg) => {
+
+          {messageList.map((msg) => {
             const isMine = msg.socketId === socketRef.current?.id;
+            const avatarUrl = msg.avatar || `https://api.dicebear.com/7.x/notionists/svg?seed=${msg.socketId}`;
             return (
-              <div key={msg.id} className={`message-row ${isMine ? "mine" : "other"}`}>
-                {!isMine && <img src={msg.avatar} className="avatar" alt="av" />}
-                
-                <div className="bubble-group">
-                  {!isMine && <span className="sender-name">{msg.displayName}</span>}
-                  <div className="bubble">
-                    {msg.message}
-                    <span className="timestamp">{formatTime(msg.time)}</span>
-                  </div>
+              <div key={msg.id} className={`message-group ${isMine ? "mine" : "other"}`}>
+                {!isMine && <img src={avatarUrl} className="avatar" alt="User avatar" />}
+                <div className="bubble">
+                  <div style={{ fontWeight: 600, marginBottom: 6 }}>{isMine ? "You" : (msg.displayName || "Anon")}</div>
+                  <div>{msg.message}</div>
+                  <div className="meta">{formatTime(msg.time)}</div>
                 </div>
               </div>
             );
           })}
-          
-          {/* Typing Indicator Bubble */}
-          {typingList.length > 0 && (
-             <div className="message-row other typing-row">
-               <div className="bubble typing-bubble">
-                 <div className="typing-dots">
-                   <span>•</span><span>•</span><span>•</span>
-                 </div>
-               </div>
-               <span className="typing-text">
-                 {typingList.length > 2 ? "Several people are typing..." : `${typingList.join(", ")} is typing...`}
-               </span>
-             </div>
-          )}
-          <div ref={scrollRef} />
+          <div ref={messagesEndRef} />
         </div>
 
-        {/* INPUT AREA */}
-        <form className="input-area" onSubmit={sendMessage}>
+        <div className="typing-indicator">
+          {typingArr.length > 0 && (
+            <span>
+              <span style={{ fontWeight: 600 }}>
+                {typingArr.length > 2 ? "Several people" : typingArr.join(", ")}
+              </span>{" "}
+              is typing...
+            </span>
+          )}
+        </div>
+
+        <div className="input-area">
           <input
-            value={inputMsg}
-            onChange={handleTyping}
-            placeholder="Type a message..."
             className="msg-input"
-            maxLength={500}
+            value={message}
+            onChange={(e) => {
+              setMessage(e.target.value);
+              handleTyping();
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                sendMessage();
+              }
+            }}
+            placeholder="Type a message..."
+            aria-label="Type a message"
           />
-          <button type="submit" className="send-btn" disabled={!inputMsg.trim()}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="22" y1="2" x2="11" y2="13" />
-              <polygon points="22 2 15 22 11 13 2 9 22 2" />
+          <button
+            className="send-btn"
+            onClick={sendMessage}
+            title="Send"
+            aria-label="Send message"
+            disabled={!message.trim()}
+            style={{ opacity: message.trim() ? 1 : 0.6 }}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="22" y1="2" x2="11" y2="13"></line>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
             </svg>
           </button>
-        </form>
+        </div>
       </div>
     </div>
   );
 }
-
-// --- CSS STYLES ---
-const STYLES = `
-  :root {
-    --primary: #6366f1;
-    --bg-app: #eef2f6;
-    --bg-card: #ffffff;
-    --text-main: #1e293b;
-    --text-sub: #64748b;
-    --bubble-mine: #6366f1;
-    --bubble-other: #f1f5f9;
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; font-family: 'Inter', system-ui, sans-serif; background: var(--bg-app); }
-  
-  .app-container {
-    display: flex; justify-content: center; align-items: center;
-    height: 100vh; padding: 20px;
-  }
-  
-  .chat-card {
-    width: 100%; max-width: 480px; height: 90vh;
-    background: var(--bg-card);
-    border-radius: 24px;
-    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.15);
-    display: flex; flex-direction: column;
-    overflow: hidden;
-  }
-
-  /* Header */
-  .chat-header {
-    padding: 16px 20px;
-    border-bottom: 1px solid #f1f5f9;
-    display: flex; justify-content: space-between; align-items: center;
-    background: rgba(255,255,255,0.8); backdrop-filter: blur(8px);
-    z-index: 10;
-  }
-  .header-info h2 { margin: 0; font-size: 18px; font-weight: 700; color: var(--text-main); }
-  .status-line { display: flex; align-items: center; font-size: 13px; color: var(--text-sub); margin-top: 4px; gap: 6px; }
-  .dot { width: 8px; height: 8px; border-radius: 50%; }
-  .online { background: #10b981; box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2); }
-  .offline { background: #ef4444; }
-  .icon-btn { background: none; border: none; cursor: pointer; font-size: 18px; padding: 8px; border-radius: 50%; transition: background 0.2s; }
-  .icon-btn:hover { background: #f1f5f9; }
-
-  /* Messages */
-  .messages-area {
-    flex: 1; padding: 20px;
-    overflow-y: auto;
-    display: flex; flex-direction: column; gap: 16px;
-    scroll-behavior: smooth;
-  }
-  .empty-state { text-align: center; margin-top: 50%; color: var(--text-sub); font-size: 14px; }
-  
-  .message-row { display: flex; gap: 12px; max-width: 85%; animation: fadeIn 0.3s ease; }
-  .message-row.mine { align-self: flex-end; flex-direction: row-reverse; }
-  
-  .avatar { width: 36px; height: 36px; border-radius: 50%; background: #eee; flex-shrink: 0; }
-  .bubble-group { display: flex; flex-direction: column; gap: 4px; }
-  
-  .sender-name { font-size: 11px; color: var(--text-sub); margin-left: 12px; }
-  .mine .sender-name { display: none; } /* hide own name */
-
-  .bubble {
-    padding: 10px 16px;
-    border-radius: 20px;
-    position: relative;
-    font-size: 15px;
-    line-height: 1.5;
-    word-wrap: break-word;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-  }
-  .mine .bubble { background: var(--bubble-mine); color: white; border-bottom-right-radius: 4px; }
-  .other .bubble { background: var(--bubble-other); color: var(--text-main); border-bottom-left-radius: 4px; }
-
-  .timestamp {
-    font-size: 9px; opacity: 0.7;
-    margin-left: 8px; vertical-align: bottom;
-    display: inline-block;
-  }
-
-  /* Typing Dots */
-  .typing-row { align-items: center; gap: 12px; }
-  .typing-bubble { padding: 12px 16px; background: #f1f5f9; border-radius: 20px; border-bottom-left-radius: 4px; width: fit-content; }
-  .typing-dots span {
-    animation: bounce 1.4s infinite ease-in-out both;
-    display: inline-block; margin: 0 1px; font-size: 18px; line-height: 10px; color: #94a3b8;
-  }
-  .typing-dots span:nth-child(1) { animation-delay: -0.32s; }
-  .typing-dots span:nth-child(2) { animation-delay: -0.16s; }
-  .typing-text { font-size: 11px; color: var(--text-sub); margin-left: 10px; font-style: italic; }
-
-  /* Input */
-  .input-area {
-    padding: 16px; background: white;
-    border-top: 1px solid #f1f5f9;
-    display: flex; gap: 10px; align-items: center;
-  }
-  .msg-input {
-    flex: 1; padding: 12px 20px;
-    border-radius: 99px;
-    border: 1px solid #e2e8f0;
-    background: #f8fafc;
-    font-size: 15px; outline: none;
-    transition: all 0.2s;
-  }
-  .msg-input:focus { border-color: var(--primary); background: white; box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1); }
-  
-  .send-btn {
-    width: 48px; height: 48px;
-    border-radius: 50%; background: var(--primary);
-    color: white; border: none; cursor: pointer;
-    display: flex; justify-content: center; align-items: center;
-    transition: transform 0.1s;
-  }
-  .send-btn:active { transform: scale(0.95); }
-  .send-btn:disabled { background: #cbd5e1; cursor: not-allowed; }
-  .send-btn svg { width: 20px; height: 20px; margin-left: -2px; margin-top: 2px; }
-
-  @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-  @keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
-  
-  @media (max-width: 600px) {
-    .app-container { padding: 0; }
-    .chat-card { height: 100dvh; max-width: 100%; border-radius: 0; }
-  }
-`;
