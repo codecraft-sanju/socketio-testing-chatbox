@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { io as ioClient } from "socket.io-client";
 
 // --- CONFIG & UTILS ---
-const FIX_TOKEN = "jhdhhdhdhhsdsdhsdhshdh"; // Woh secret token jo tumne manga
+const FIX_TOKEN = "jhdhhdhdhhsdsdhsdhshdh"; 
 const NOTIFICATION_SOUND = "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3";
 
 function generateId() {
@@ -35,21 +35,28 @@ export default function App() {
   const handleLogin = () => {
     if (!inputName.trim()) return alert("Please enter your name!");
     
-    // Save to LocalStorage
     localStorage.setItem("chat_app_token", FIX_TOKEN);
     localStorage.setItem("chat_app_username", inputName.trim());
     
-    // Update State
     setUsername(inputName.trim());
     setIsLoggedIn(true);
   };
 
+  // 3. Handle Logout (NEW FUNCTION)
+  const handleLogout = () => {
+    // Token aur details delete karo
+    localStorage.removeItem("chat_app_token");
+    localStorage.removeItem("chat_app_username");
+    // State reset karo
+    setIsLoggedIn(false);
+    setUsername("");
+    setInputName("");
+  };
+
   // --- RENDER ---
   if (!isLoggedIn) {
-    // LOGIN / SIGNUP SCREEN
     return (
       <div className="app-container">
-        {/* Reuse same global styles */}
         <StyleSheet /> 
         <div className="chat-card login-card">
           <div style={{ textAlign: 'center', width: '100%' }}>
@@ -79,18 +86,21 @@ export default function App() {
     );
   }
 
-  // LOGGED IN -> SHOW CHAT
-  return <ChatRoom username={username} />;
+  // LOGGED IN -> SHOW CHAT (Pass handleLogout prop)
+  return <ChatRoom username={username} onLogout={handleLogout} />;
 }
 
-// --- CHAT ROOM COMPONENT (Existing Logic moved here) ---
-function ChatRoom({ username }) {
+// --- CHAT ROOM COMPONENT ---
+function ChatRoom({ username, onLogout }) {
   // STATE
   const [message, setMessage] = useState("");
   const [messageList, setMessageList] = useState([]);
   const [connected, setConnected] = useState(false);
   const [typingUsers, setTypingUsers] = useState({});
   const [totalUsers, setTotalUsers] = useState(1);
+  
+  // NEW STATE FOR LOGOUT MENU
+  const [showLogout, setShowLogout] = useState(false);
 
   // MUTE STATE
   const [isMuted, setIsMuted] = useState(() => localStorage.getItem("chat_muted") === "true");
@@ -101,7 +111,6 @@ function ChatRoom({ username }) {
   const audioRef = useRef(null);
   const pendingRef = useRef(new Map());
   
-  // Is bar random name nahi, user ka name use hoga
   const clientDisplayName = useRef(username); 
   const isMutedRef = useRef(isMuted);
 
@@ -133,7 +142,6 @@ function ChatRoom({ username }) {
     socket.on("connect", () => {
       console.log("socket connected", socket.id);
       setConnected(true);
-      // Identify with the REAL username
       socket.emit("identify", { displayName: clientDisplayName.current });
     });
 
@@ -220,8 +228,8 @@ function ChatRoom({ username }) {
       message: message.trim(),
       time: new Date().toISOString(),
       socketId: socketRef.current.id,
-      displayName: clientDisplayName.current, // Use stored name
-      avatar: `https://api.dicebear.com/7.x/notionists/svg?seed=${clientDisplayName.current}&backgroundColor=b6e3f4,c0aede,d1d4f9` // Avatar based on name now
+      displayName: clientDisplayName.current,
+      avatar: `https://api.dicebear.com/7.x/notionists/svg?seed=${clientDisplayName.current}&backgroundColor=b6e3f4,c0aede,d1d4f9`
     };
 
     pendingRef.current.set(id, msgData);
@@ -269,16 +277,51 @@ function ChatRoom({ username }) {
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
               )}
             </button>
-            <img
-              src={`https://api.dicebear.com/7.x/notionists/svg?seed=${username}&backgroundColor=b6e3f4,c0aede,d1d4f9`}
-              alt="My Avatar"
-              className="avatar"
-            />
+            
+            {/* --- AVATAR & LOGOUT MENU AREA --- */}
+            <div style={{ position: 'relative' }}>
+                <img
+                  src={`https://api.dicebear.com/7.x/notionists/svg?seed=${username}&backgroundColor=b6e3f4,c0aede,d1d4f9`}
+                  alt="My Avatar"
+                  className="avatar"
+                  // CLICK ON AVATAR TOGGLES MENU
+                  onClick={() => setShowLogout(!showLogout)}
+                  style={{ cursor: "pointer", border: showLogout ? "2px solid #ef4444" : "2px solid white" }}
+                />
+                
+                {/* LOGOUT BUTTON DROPDOWN */}
+                {showLogout && (
+                  <button 
+                    onClick={onLogout}
+                    style={{
+                      position: 'absolute',
+                      top: '45px',
+                      right: '0',
+                      background: '#fff',
+                      border: '1px solid #e5e7eb',
+                      padding: '8px 12px',
+                      borderRadius: '8px',
+                      boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+                      color: '#ef4444',
+                      fontWeight: 600,
+                      fontSize: '13px',
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                      zIndex: 100
+                    }}
+                  >
+                    Logout ↪
+                  </button>
+                )}
+            </div>
+            {/* ------------------------------- */}
+
           </div>
         </div>
 
         {/* MESSAGES */}
-        <div className="messages-area">
+        <div className="messages-area" onClick={() => setShowLogout(false)}> 
+        {/* Clicking chat area closes menu */}
           {messageList.length === 0 && (
             <div style={{ textAlign: "center", marginTop: 40, color: "#9ca3af", fontSize: 14 }}>
               Welcome, {username}! Say Hi! 👋
@@ -287,7 +330,6 @@ function ChatRoom({ username }) {
 
           {messageList.map((msg) => {
             const isMine = msg.socketId === socketRef.current?.id;
-            // Avatar fallback: use Name seed if available, else socketID
             const seed = msg.displayName || msg.socketId;
             const avatarUrl = msg.avatar || `https://api.dicebear.com/7.x/notionists/svg?seed=${seed}&backgroundColor=b6e3f4,c0aede,d1d4f9`;
             const isPending = pendingRef.current.has(msg.id);
