@@ -536,7 +536,7 @@ const StyleSheet = () => (
     .meta { font-size: 10px; margin-top: 4px; opacity: 0.7; text-align: right; display: block; margin-bottom: -2px; }
     .bubble.pending { opacity:0.8; }
 
-    /* --- REACTION STYLES --- */
+    /* --- REACTION STYLES (FIXED POSITIONING) --- */
     .reaction-btn-trigger {
         position: absolute; top: -10px; right: -5px; width: 26px; height: 26px;
         border-radius: 50%; border: 1px solid #e5e7eb; background: #fff;
@@ -548,19 +548,26 @@ const StyleSheet = () => (
     .mine .reaction-btn-trigger { right: auto; left: -5px; }
 
     .reaction-picker-popup {
-        position: absolute; top: -50px; right: 0;
+        position: absolute; top: -55px; 
+        
+        /* DEFAULT (Others): Left aligned */
+        left: 0; right: auto;
+        
         background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(8px);
         border: 1px solid #e5e7eb; padding: 6px 10px;
         border-radius: 30px;
         box-shadow: 0 8px 20px rgba(0,0,0,0.15);
-        /* CHANGED: Use GRID for better layout control */
         display: grid; 
-        grid-template-columns: repeat(6, 1fr); /* Desktop: 6 in a row */
+        grid-template-columns: repeat(6, 1fr);
         gap: 5px; 
         z-index: 50;
         animation: popIn 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
     }
-    .mine .reaction-picker-popup { right: auto; left: 0; }
+
+    /* MINE (Right Side): Right aligned so it grows inwards */
+    .mine .reaction-picker-popup {
+        left: auto; right: 0;
+    }
     
     .emoji-item {
         cursor: pointer; font-size: 20px; transition: transform 0.2s;
@@ -620,9 +627,9 @@ const StyleSheet = () => (
       
       /* --- MOBILE FIX FOR POPUP --- */
       .reaction-picker-popup {
-          grid-template-columns: repeat(3, 1fr); /* 3 Columns on mobile (2 Rows) */
-          top: -85px; /* Adjust top position since it's now taller */
-          padding: 8px;
+          grid-template-columns: repeat(3, 1fr); /* 3 Columns on mobile */
+          width: 140px; /* FIXED WIDTH to ensure no overflow */
+          top: -90px;
       }
     }
   `}</style>
