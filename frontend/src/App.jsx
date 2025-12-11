@@ -11,7 +11,7 @@ function formatTime(dateInput) {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-// Notification sound URL (you can replace)
+// Notification sound URL
 const NOTIFICATION_SOUND = "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3";
 
 export default function App() {
@@ -26,8 +26,8 @@ export default function App() {
   const socketRef = useRef(null);
   const messagesEndRef = useRef(null);
   const audioRef = useRef(null);
-  const pendingRef = useRef(new Map()); // optimistic messages not yet confirmed by server (keyed by id)
-  const clientDisplayName = useRef(`User-${Math.random().toString(36).slice(2,6)}`);
+  const pendingRef = useRef(new Map()); // optimistic messages
+  const clientDisplayName = useRef(`User-${Math.random().toString(36).slice(2, 6)}`);
 
   // init audio once
   useEffect(() => {
@@ -37,7 +37,7 @@ export default function App() {
 
   // --- SOCKET CONNECTION ---
   useEffect(() => {
-    const SOCKET_URL = "https://socketio-testing-chatbox.onrender.com"; // change if needed
+    const SOCKET_URL = "https://socketio-testing-chatbox.onrender.com";
 
     const socket = ioClient(SOCKET_URL, {
       transports: ["websocket"],
@@ -49,7 +49,6 @@ export default function App() {
     socket.on("connect", () => {
       console.log("socket connected", socket.id);
       setConnected(true);
-      // Inform server of our name (optional)
       socket.emit("identify", { displayName: clientDisplayName.current });
     });
 
@@ -59,20 +58,16 @@ export default function App() {
       setTypingUsers({});
     });
 
-    // Server history (array)
+    // Server history
     socket.on("history", (history = []) => {
-      // Merge server history with any pending local optimistic messages
       setMessageList((prev) => {
         const merged = new Map();
-        // add server history first
         history.forEach((m) => {
           if (m && m.id) merged.set(m.id, m);
         });
-        // then add previous existing messages (in case there are local-only messages)
         prev.forEach((m) => {
           if (m && m.id && !merged.has(m.id)) merged.set(m.id, m);
         });
-        // ensure pending optimistic messages (if any) are present
         pendingRef.current.forEach((m, id) => {
           if (!merged.has(id)) merged.set(id, m);
         });
@@ -80,27 +75,22 @@ export default function App() {
       });
     });
 
-    // Receive message broadcast
+    // Receive message
     socket.on("receive_message", (data) => {
       if (!data || !data.id) return;
       setMessageList((prev) => {
-        // put messages into a map key'd by id to dedupe & keep order
         const map = new Map();
         prev.forEach((m) => map.set(m.id, m));
-        // insert/overwrite with incoming server message
         map.set(data.id, data);
         return Array.from(map.values());
       });
 
-      // If this message was pending, remove from pending
       if (pendingRef.current.has(data.id)) {
         pendingRef.current.delete(data.id);
       }
 
-      // Play sound only if message is from someone else
       if (data.socketId && data.socketId !== socketRef.current?.id) {
         try {
-          // browsers require user interaction for autoplay; catch any error silently
           audioRef.current?.play().catch(() => {});
         } catch (e) {}
       }
@@ -108,9 +98,8 @@ export default function App() {
 
     // Typing events
     socket.on("user_typing", (payload) => {
-      // payload: { socketId, typing, displayName }
       if (!payload || !payload.socketId) return;
-      if (payload.socketId === socketRef.current?.id) return; // ignore our own
+      if (payload.socketId === socketRef.current?.id) return;
       setTypingUsers((prev) => {
         const next = { ...prev };
         if (payload.typing) next[payload.socketId] = payload.displayName || "Someone";
@@ -123,7 +112,6 @@ export default function App() {
       if (payload && typeof payload.total === "number") setTotalUsers(payload.total);
     });
 
-    // debug errors
     socket.on("connect_error", (err) => console.warn("connect_error:", err?.message || err));
     socket.on("error", (err) => console.warn("socket_error:", err));
 
@@ -133,7 +121,7 @@ export default function App() {
     };
   }, []);
 
-  // Auto scroll on messages or typing changes
+  // Auto scroll
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messageList, typingUsers]);
@@ -150,7 +138,7 @@ export default function App() {
     }, 1200);
   };
 
-  // Send message (optimistic)
+  // Send message
   const sendMessage = () => {
     if (!message.trim() || !socketRef.current) return;
     const id = generateId();
@@ -163,7 +151,6 @@ export default function App() {
       avatar: `https://api.dicebear.com/7.x/notionists/svg?seed=${socketRef.current.id}&backgroundColor=b6e3f4,c0aede,d1d4f9`
     };
 
-    // optimistic update + mark as pending
     pendingRef.current.set(id, msgData);
     setMessageList((prev) => {
       const map = new Map();
@@ -172,27 +159,22 @@ export default function App() {
       return Array.from(map.values());
     });
 
-    // emit with optional acknowledgement
     socketRef.current.emit("send_message", msgData, (ack) => {
-      // ack may contain { ok: true, id } if server sends it
       if (ack && ack.id) {
-        // server confirmed storage; if server modifies message we rely on receive_message to sync
         pendingRef.current.delete(ack.id);
       }
     });
 
-    // stop typing state
     socketRef.current.emit("typing", { typing: false });
-
     setMessage("");
   };
 
-  // helpers
   const otherUsersCount = Math.max(0, totalUsers - 1);
   const typingArr = Object.values(typingUsers);
 
   return (
     <div className="app-container">
+      {/* --- UPDATED CSS START --- */}
       <style>{`
         :root {
           --primary: #4f46e5;
@@ -204,76 +186,144 @@ export default function App() {
           --text-main: #1f2937;
           --text-sub: #6b7280;
         }
-        body { margin: 0; font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; background: var(--bg); }
-        .app-container { display:flex; justify-content:center; align-items:center; min-height:100dvh; padding:20px; box-sizing:border-box; }
-        .chat-card { width:100%; max-width:700px; height:85vh; background:var(--chat-bg); border-radius:24px; box-shadow:0 20px 50px -10px rgba(0,0,0,0.1); display:flex; flex-direction:column; overflow:hidden; position:relative;}
-        .chat-header { padding:16px 20px; background: rgba(255,255,255,0.9); backdrop-filter: blur(10px); border-bottom:1px solid #f0f0f0; display:flex; justify-content:space-between; align-items:center; z-index:10;}
+        
+        body { margin: 0; font-family: Inter, system-ui, -apple-system, sans-serif; background: var(--bg); }
+        
+        .app-container { 
+          display:flex; justify-content:center; align-items:center; 
+          min-height:100dvh; padding:20px; box-sizing:border-box; 
+        }
+        
+        .chat-card { 
+          width:100%; max-width:700px; height:85vh; 
+          background:var(--chat-bg); border-radius:24px; 
+          box-shadow:0 20px 50px -10px rgba(0,0,0,0.1); 
+          display:flex; flex-direction:column; overflow:hidden; position:relative;
+        }
+
+        .chat-header { 
+          padding:16px 20px; background: rgba(255,255,255,0.95); 
+          backdrop-filter: blur(10px); border-bottom:1px solid #f0f0f0; 
+          display:flex; justify-content:space-between; align-items:center; z-index:10;
+        }
+        
         .status-dot { height:8px; width:8px; border-radius:50%; display:inline-block; margin-right:6px;}
         .online { background:#22c55e; box-shadow:0 0 8px #22c55e; }
         .offline { background:#ef4444; }
-        .messages-area { flex:1; padding:20px; overflow-y:auto; background-image: radial-gradient(#e5e7eb 1px, transparent 1px); background-size:20px 20px; display:flex; flex-direction:column; gap:12px; }
-        .message-group { display:flex; gap:10px; max-width:100%; animation:slideIn .2s ease; }
-        .message-group.mine {
-  align-self: flex-end;
-  flex-direction: row-reverse;
-  max-width: 100%; /* prevent squeezing */
-}
-        .avatar { width:36px; height:36px; border-radius:50%; background:#ddd; border:2px solid white; flex-shrink:0; }
 
-        /* BUBBLE: flexible wrapping + avoid single-letter vertical stacking */
-        .bubble { padding:10px 14px; border-radius:18px; position:relative; font-size:14px; line-height:1.45; box-shadow:0 2px 5px rgba(0,0,0,0.05);
-          white-space:pre-wrap; /* preserve user line breaks */
-          word-break: normal; /* don't force break between characters */
-          overflow-wrap: break-word; /* break long words when needed but prefer natural break points */
-          hyphens: auto; /* allow hyphenation where supported */
-          max-width: calc(100% - 120px); /* keep room for avatar + padding */
+        .messages-area { 
+          flex:1; padding:20px; overflow-y:auto; 
+          background-image: radial-gradient(#e5e7eb 1px, transparent 1px); 
+          background-size:20px 20px; 
+          display:flex; flex-direction:column; gap:12px; 
         }
+
+        /* Message Groups */
+        .message-group { 
+          display:flex; gap:10px; width: 100%; 
+          animation:slideIn .2s ease; 
+        }
+        
+        .message-group.mine { 
+          flex-direction: row-reverse; 
+        }
+
+        .avatar { 
+          width:36px; height:36px; border-radius:50%; background:#ddd; 
+          border:2px solid white; flex-shrink:0; object-fit: cover;
+        }
+
+        /* --- BUBBLE STYLE FIXED FOR WRAPPING --- */
+        .bubble { 
+          padding: 10px 16px; 
+          border-radius: 18px; 
+          position: relative; 
+          font-size: 15px; 
+          line-height: 1.5; 
+          box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+          
+          /* Key Wrapping Properties */
+          width: fit-content;            
+          max-width: 75%;                /* Desktop default */
+          overflow-wrap: anywhere;       /* Breaks long URLs properly */
+          word-break: normal;            /* Keeps normal words intact */
+          white-space: pre-wrap;         /* Respects line breaks */
+        }
+
         .mine .bubble {
-  background: var(--mine-bubble);
-  color: white;
-  border-bottom-right-radius: 4px;
-  max-width: 75%; /* updated width */
-  width: fit-content; /* prevent vertical collapsing */
-  white-space: pre-wrap;
-  word-break: break-word;
-  overflow-wrap: break-word;
-}
-        .other .bubble { background:var(--other-bubble); color:var(--text-main); border-bottom-left-radius:4px; }
-        .meta { font-size:10px; margin-top:6px; opacity:0.8; text-align:right; }
+          background: var(--mine-bubble);
+          color: white;
+          border-bottom-right-radius: 4px;
+        }
 
-        /* Show slightly faded for optimistic (pending) messages */
-        .bubble.pending { opacity:0.9; filter:grayscale(.02); }
+        .other .bubble { 
+          background: var(--other-bubble); 
+          color: var(--text-main); 
+          border-bottom-left-radius: 4px; 
+        }
 
-        .typing-indicator { font-size:12px; color:var(--text-sub); padding:0 24px 8px; height:20px; }
-        .input-area { padding:12px 16px; background:white; border-top:1px solid #f3f4f6; display:flex; gap:10px; align-items:center; }
-        .msg-input { flex:1; background:#f9fafb; border:1px solid #e5e7eb; padding:12px 16px; border-radius:99px; outline:none; font-size:14px; transition:all .2s; min-height:44px; max-height:140px; overflow:auto; resize:none; }
-        .msg-input:focus { border-color:var(--primary); box-shadow:0 0 0 3px var(--primary-light); background:white; }
-        .send-btn { background:var(--primary); color:white; border:none; width:44px; height:44px; border-radius:50%; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:transform .1s; }
+        .meta { 
+          font-size: 10px; margin-top: 4px; opacity: 0.7; 
+          text-align: right; display: block; margin-bottom: -2px;
+        }
+        
+        .bubble.pending { opacity:0.8; }
+
+        /* Footer & Input */
+        .typing-indicator { 
+          font-size:12px; color:var(--text-sub); 
+          padding:0 24px 8px; height:20px; min-height:20px;
+        }
+        
+        .input-area { 
+          padding:12px 16px; background:white; border-top:1px solid #f3f4f6; 
+          display:flex; gap:10px; align-items:flex-end; 
+        }
+        
+        .msg-input { 
+          flex:1; background:#f9fafb; border:1px solid #e5e7eb; 
+          padding:12px 16px; border-radius:24px; outline:none; font-size:15px; 
+          transition:all .2s; min-height:24px; max-height:120px; 
+          overflow-y:auto; resize:none; line-height: 1.4;
+          font-family: inherit;
+        }
+        .msg-input:focus { 
+          border-color:var(--primary); box-shadow:0 0 0 3px var(--primary-light); 
+          background:white; 
+        }
+        
+        .send-btn { 
+          background:var(--primary); color:white; border:none; width:46px; height:46px; 
+          border-radius:50%; cursor:pointer; display:flex; align-items:center; 
+          justify-content:center; flex-shrink: 0; margin-bottom: 2px;
+        }
         .send-btn:active { transform:scale(.95); }
 
-        @keyframes slideIn { from { opacity:0; transform:translateY(6px);} to { opacity:1; transform:translateY(0);} }
+        @keyframes slideIn { 
+          from { opacity:0; transform:translateY(10px);} 
+          to { opacity:1; transform:translateY(0);} 
+        }
 
-        /* RESPONSIVE TWEAKS */
-        @media (max-width:900px) {
-          .chat-card { max-width:640px; height:88vh; }
-          .bubble { max-width: calc(100% - 100px); }
+        /* --- RESPONSIVE / MOBILE FIXES --- */
+        @media (max-width: 900px) {
+          .chat-card { max-width: 640px; height: 90vh; }
         }
-        @media (max-width:600px) {
-          .app-container { padding:0; }
-          .chat-card { height:100dvh; max-width:100%; border-radius:0; }
-          .avatar { width:32px; height:32px; }
-          /* On narrow screens allow bubbles to take most of the width but prevent collapsing into a thin column */
-          .bubble { max-width: calc(100% - 72px); font-size:15px; width: auto; display: inline-block; min-width: 88px; }
-          .message-group { flex-wrap: nowrap; }
-          .message-group.mine { justify-content: flex-end; }
-          .chat-header h2 { font-size:16px; }
-        }
-          .chat-card { height:100dvh; max-width:100%; border-radius:0; }
-          .avatar { width:32px; height:32px; }
-          .bubble { max-width: calc(100% - 72px); font-size:15px; }
-          .chat-header h2 { font-size:16px; }
+
+        @media (max-width: 600px) {
+          .app-container { padding: 0; height: 100dvh; }
+          .chat-card { 
+            height: 100%; max-width: 100%; 
+            border-radius: 0; box-shadow: none; 
+          }
+          .avatar { width: 32px; height: 32px; }
+          
+          /* Allow wider bubbles on mobile */
+          .bubble { max-width: 85%; font-size: 15px; }
+          .chat-header h2 { font-size: 16px; }
         }
       `}</style>
+      {/* --- UPDATED CSS END --- */}
+
       <div className="chat-card">
         <div className="chat-header">
           <div>
@@ -307,7 +357,9 @@ export default function App() {
               <div key={msg.id} className={`message-group ${isMine ? "mine" : "other"}`}>
                 {!isMine && <img src={avatarUrl} className="avatar" alt="User avatar" />}
                 <div className={`bubble ${isPending ? "pending" : ""}`}>
-                  <div style={{ fontWeight: 600, marginBottom: 6 }}>{isMine ? "You" : (msg.displayName || "Anon")}</div>
+                  <div style={{ fontWeight: 600, marginBottom: 4, fontSize: '0.9em' }}>
+                    {isMine ? "You" : (msg.displayName || "Anon")}
+                  </div>
                   <div>{msg.message}</div>
                   <div className="meta">{formatTime(msg.time)}</div>
                 </div>
@@ -342,7 +394,7 @@ export default function App() {
                 sendMessage();
               }
             }}
-            placeholder="Type a message... (Shift+Enter for newline)"
+            placeholder="Type a message..."
             aria-label="Type a message"
             rows={1}
           />
