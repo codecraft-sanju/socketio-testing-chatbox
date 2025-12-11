@@ -1,4 +1,3 @@
-// frontend/src/App.jsx
 import React, { useEffect, useRef, useState } from "react";
 import { io as ioClient } from "socket.io-client";
 
@@ -207,27 +206,50 @@ export default function App() {
         }
         body { margin: 0; font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; background: var(--bg); }
         .app-container { display:flex; justify-content:center; align-items:center; min-height:100dvh; padding:20px; box-sizing:border-box; }
-        .chat-card { width:100%; max-width:500px; height:85vh; background:var(--chat-bg); border-radius:24px; box-shadow:0 20px 50px -10px rgba(0,0,0,0.1); display:flex; flex-direction:column; overflow:hidden; position:relative;}
+        .chat-card { width:100%; max-width:700px; height:85vh; background:var(--chat-bg); border-radius:24px; box-shadow:0 20px 50px -10px rgba(0,0,0,0.1); display:flex; flex-direction:column; overflow:hidden; position:relative;}
         .chat-header { padding:16px 20px; background: rgba(255,255,255,0.9); backdrop-filter: blur(10px); border-bottom:1px solid #f0f0f0; display:flex; justify-content:space-between; align-items:center; z-index:10;}
         .status-dot { height:8px; width:8px; border-radius:50%; display:inline-block; margin-right:6px;}
         .online { background:#22c55e; box-shadow:0 0 8px #22c55e; }
         .offline { background:#ef4444; }
         .messages-area { flex:1; padding:20px; overflow-y:auto; background-image: radial-gradient(#e5e7eb 1px, transparent 1px); background-size:20px 20px; display:flex; flex-direction:column; gap:12px; }
-        .message-group { display:flex; gap:10px; max-width:80%; animation:slideIn .2s ease; }
+        .message-group { display:flex; gap:10px; max-width:100%; animation:slideIn .2s ease; }
         .message-group.mine { align-self:flex-end; flex-direction:row-reverse; }
-        .avatar { width:32px; height:32px; border-radius:50%; background:#ddd; border:2px solid white; flex-shrink:0; }
-        .bubble { padding:10px 14px; border-radius:18px; position:relative; font-size:14px; line-height:1.4; box-shadow:0 2px 5px rgba(0,0,0,0.05); }
+        .avatar { width:36px; height:36px; border-radius:50%; background:#ddd; border:2px solid white; flex-shrink:0; }
+
+        /* BUBBLE: flexible wrapping + long-word handling */
+        .bubble { padding:10px 14px; border-radius:18px; position:relative; font-size:14px; line-height:1.45; box-shadow:0 2px 5px rgba(0,0,0,0.05); white-space:pre-wrap; /* keep user's line breaks */
+          word-break:break-word; /* break long words when needed */
+          overflow-wrap:anywhere; /* strong guarantee to avoid overflow */
+          max-width: calc(100% - 120px); /* keep room for avatar + padding */
+        }
         .mine .bubble { background:var(--mine-bubble); color:white; border-bottom-right-radius:4px; }
         .other .bubble { background:var(--other-bubble); color:var(--text-main); border-bottom-left-radius:4px; }
-        .meta { font-size:10px; margin-top:4px; opacity:0.7; text-align:right; }
+        .meta { font-size:10px; margin-top:6px; opacity:0.8; text-align:right; }
+
+        /* Show slightly faded for optimistic (pending) messages */
+        .bubble.pending { opacity:0.85; filter:grayscale(.02); }
+
         .typing-indicator { font-size:12px; color:var(--text-sub); padding:0 24px 8px; height:20px; }
-        .input-area { padding:16px; background:white; border-top:1px solid #f3f4f6; display:flex; gap:10px; align-items:center; }
-        .msg-input { flex:1; background:#f9fafb; border:1px solid #e5e7eb; padding:12px 16px; border-radius:99px; outline:none; font-size:14px; transition:all .2s; }
+        .input-area { padding:12px 16px; background:white; border-top:1px solid #f3f4f6; display:flex; gap:10px; align-items:center; }
+        .msg-input { flex:1; background:#f9fafb; border:1px solid #e5e7eb; padding:12px 16px; border-radius:99px; outline:none; font-size:14px; transition:all .2s; min-height:44px; max-height:140px; overflow:auto; resize:none; }
         .msg-input:focus { border-color:var(--primary); box-shadow:0 0 0 3px var(--primary-light); background:white; }
         .send-btn { background:var(--primary); color:white; border:none; width:44px; height:44px; border-radius:50%; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:transform .1s; }
         .send-btn:active { transform:scale(.95); }
+
         @keyframes slideIn { from { opacity:0; transform:translateY(6px);} to { opacity:1; transform:translateY(0);} }
-        @media (max-width:600px) { .app-container { padding:0; } .chat-card { height:100dvh; max-width:100%; border-radius:0; } }
+
+        /* RESPONSIVE TWEAKS */
+        @media (max-width:900px) {
+          .chat-card { max-width:640px; height:88vh; }
+          .bubble { max-width: calc(100% - 100px); }
+        }
+        @media (max-width:600px) {
+          .app-container { padding:0; }
+          .chat-card { height:100dvh; max-width:100%; border-radius:0; }
+          .avatar { width:32px; height:32px; }
+          .bubble { max-width: calc(100% - 72px); font-size:15px; }
+          .chat-header h2 { font-size:16px; }
+        }
       `}</style>
       <div className="chat-card">
         <div className="chat-header">
@@ -257,10 +279,11 @@ export default function App() {
           {messageList.map((msg) => {
             const isMine = msg.socketId === socketRef.current?.id;
             const avatarUrl = msg.avatar || `https://api.dicebear.com/7.x/notionists/svg?seed=${msg.socketId}`;
+            const isPending = pendingRef.current.has(msg.id);
             return (
               <div key={msg.id} className={`message-group ${isMine ? "mine" : "other"}`}>
                 {!isMine && <img src={avatarUrl} className="avatar" alt="User avatar" />}
-                <div className="bubble">
+                <div className={`bubble ${isPending ? "pending" : ""}`}>
                   <div style={{ fontWeight: 600, marginBottom: 6 }}>{isMine ? "You" : (msg.displayName || "Anon")}</div>
                   <div>{msg.message}</div>
                   <div className="meta">{formatTime(msg.time)}</div>
@@ -283,7 +306,7 @@ export default function App() {
         </div>
 
         <div className="input-area">
-          <input
+          <textarea
             className="msg-input"
             value={message}
             onChange={(e) => {
@@ -291,13 +314,14 @@ export default function App() {
               handleTyping();
             }}
             onKeyDown={(e) => {
-              if (e.key === "Enter") {
+              if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 sendMessage();
               }
             }}
-            placeholder="Type a message..."
+            placeholder="Type a message... (Shift+Enter for newline)"
             aria-label="Type a message"
+            rows={1}
           />
           <button
             className="send-btn"
