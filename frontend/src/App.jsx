@@ -22,18 +22,37 @@ export default function App() {
   const [typingUsers, setTypingUsers] = useState({});
   const [totalUsers, setTotalUsers] = useState(1);
 
+  // MUTE STATE (with localStorage persistence)
+  const [isMuted, setIsMuted] = useState(() => {
+    return localStorage.getItem("chat_muted") === "true";
+  });
+
   // REFS
   const socketRef = useRef(null);
   const messagesEndRef = useRef(null);
   const audioRef = useRef(null);
-  const pendingRef = useRef(new Map()); // optimistic messages
+  const pendingRef = useRef(new Map());
   const clientDisplayName = useRef(`User-${Math.random().toString(36).slice(2, 6)}`);
+  
+  // We use a Ref for isMuted inside the socket callback to avoid stale closures
+  const isMutedRef = useRef(isMuted);
 
-  // init audio once
+  // Sync Ref when state changes
+  useEffect(() => {
+    isMutedRef.current = isMuted;
+    localStorage.setItem("chat_muted", isMuted);
+  }, [isMuted]);
+
+  // Init audio
   useEffect(() => {
     audioRef.current = new Audio(NOTIFICATION_SOUND);
     audioRef.current.preload = "auto";
   }, []);
+
+  // Toggle Mute Handler
+  const toggleMute = () => {
+    setIsMuted((prev) => !prev);
+  };
 
   // --- SOCKET CONNECTION ---
   useEffect(() => {
@@ -89,10 +108,13 @@ export default function App() {
         pendingRef.current.delete(data.id);
       }
 
+      // Play sound ONLY if not from self AND not muted
       if (data.socketId && data.socketId !== socketRef.current?.id) {
-        try {
-          audioRef.current?.play().catch(() => {});
-        } catch (e) {}
+        if (!isMutedRef.current) {
+          try {
+            audioRef.current?.play().catch(() => {});
+          } catch (e) {}
+        }
       }
     });
 
@@ -174,7 +196,7 @@ export default function App() {
 
   return (
     <div className="app-container">
-      {/* --- UPDATED CSS START --- */}
+      {/* --- CSS STYLES --- */}
       <style>{`
         :root {
           --primary: #4f46e5;
@@ -206,6 +228,19 @@ export default function App() {
           backdrop-filter: blur(10px); border-bottom:1px solid #f0f0f0; 
           display:flex; justify-content:space-between; align-items:center; z-index:10;
         }
+
+        .header-controls {
+          display: flex; align-items: center; gap: 12px;
+        }
+        
+        /* ICON BUTTON STYLE */
+        .icon-btn {
+          background: transparent; border: none; cursor: pointer;
+          color: #6b7280; padding: 6px; border-radius: 50%;
+          display: flex; align-items: center; justify-content: center;
+          transition: background 0.2s, color 0.2s;
+        }
+        .icon-btn:hover { background: #f3f4f6; color: #111; }
         
         .status-dot { height:8px; width:8px; border-radius:50%; display:inline-block; margin-right:6px;}
         .online { background:#22c55e; box-shadow:0 0 8px #22c55e; }
@@ -218,62 +253,29 @@ export default function App() {
           display:flex; flex-direction:column; gap:12px; 
         }
 
-        /* Message Groups */
-        .message-group { 
-          display:flex; gap:10px; width: 100%; 
-          animation:slideIn .2s ease; 
-        }
-        
-        .message-group.mine { 
-          flex-direction: row-reverse; 
-        }
+        .message-group { display:flex; gap:10px; width: 100%; animation:slideIn .2s ease; }
+        .message-group.mine { flex-direction: row-reverse; }
 
         .avatar { 
           width:36px; height:36px; border-radius:50%; background:#ddd; 
           border:2px solid white; flex-shrink:0; object-fit: cover;
         }
 
-        /* --- BUBBLE STYLE FIXED FOR WRAPPING --- */
+        /* BUBBLE STYLE */
         .bubble { 
-          padding: 10px 16px; 
-          border-radius: 18px; 
-          position: relative; 
-          font-size: 15px; 
-          line-height: 1.5; 
-          box-shadow: 0 1px 2px rgba(0,0,0,0.06);
-          
-          /* Key Wrapping Properties */
-          width: fit-content;            
-          max-width: 75%;                /* Desktop default */
-          overflow-wrap: anywhere;       /* Breaks long URLs properly */
-          word-break: normal;            /* Keeps normal words intact */
-          white-space: pre-wrap;         /* Respects line breaks */
+          padding: 10px 16px; border-radius: 18px; position: relative; 
+          font-size: 15px; line-height: 1.5; box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+          width: fit-content; max-width: 75%; 
+          overflow-wrap: anywhere; word-break: normal; white-space: pre-wrap; 
         }
 
-        .mine .bubble {
-          background: var(--mine-bubble);
-          color: white;
-          border-bottom-right-radius: 4px;
-        }
+        .mine .bubble { background: var(--mine-bubble); color: white; border-bottom-right-radius: 4px; }
+        .other .bubble { background: var(--other-bubble); color: var(--text-main); border-bottom-left-radius: 4px; }
 
-        .other .bubble { 
-          background: var(--other-bubble); 
-          color: var(--text-main); 
-          border-bottom-left-radius: 4px; 
-        }
-
-        .meta { 
-          font-size: 10px; margin-top: 4px; opacity: 0.7; 
-          text-align: right; display: block; margin-bottom: -2px;
-        }
-        
+        .meta { font-size: 10px; margin-top: 4px; opacity: 0.7; text-align: right; display: block; margin-bottom: -2px; }
         .bubble.pending { opacity:0.8; }
 
-        /* Footer & Input */
-        .typing-indicator { 
-          font-size:12px; color:var(--text-sub); 
-          padding:0 24px 8px; height:20px; min-height:20px;
-        }
+        .typing-indicator { font-size:12px; color:var(--text-sub); padding:0 24px 8px; height:20px; min-height:20px; }
         
         .input-area { 
           padding:12px 16px; background:white; border-top:1px solid #f3f4f6; 
@@ -284,13 +286,9 @@ export default function App() {
           flex:1; background:#f9fafb; border:1px solid #e5e7eb; 
           padding:12px 16px; border-radius:24px; outline:none; font-size:15px; 
           transition:all .2s; min-height:24px; max-height:120px; 
-          overflow-y:auto; resize:none; line-height: 1.4;
-          font-family: inherit;
+          overflow-y:auto; resize:none; line-height: 1.4; font-family: inherit;
         }
-        .msg-input:focus { 
-          border-color:var(--primary); box-shadow:0 0 0 3px var(--primary-light); 
-          background:white; 
-        }
+        .msg-input:focus { border-color:var(--primary); box-shadow:0 0 0 3px var(--primary-light); background:white; }
         
         .send-btn { 
           background:var(--primary); color:white; border:none; width:46px; height:46px; 
@@ -299,30 +297,17 @@ export default function App() {
         }
         .send-btn:active { transform:scale(.95); }
 
-        @keyframes slideIn { 
-          from { opacity:0; transform:translateY(10px);} 
-          to { opacity:1; transform:translateY(0);} 
-        }
+        @keyframes slideIn { from { opacity:0; transform:translateY(10px);} to { opacity:1; transform:translateY(0);} }
 
-        /* --- RESPONSIVE / MOBILE FIXES --- */
-        @media (max-width: 900px) {
-          .chat-card { max-width: 640px; height: 90vh; }
-        }
-
+        @media (max-width: 900px) { .chat-card { max-width: 640px; height: 90vh; } }
         @media (max-width: 600px) {
           .app-container { padding: 0; height: 100dvh; }
-          .chat-card { 
-            height: 100%; max-width: 100%; 
-            border-radius: 0; box-shadow: none; 
-          }
+          .chat-card { height: 100%; max-width: 100%; border-radius: 0; box-shadow: none; }
           .avatar { width: 32px; height: 32px; }
-          
-          /* Allow wider bubbles on mobile */
           .bubble { max-width: 85%; font-size: 15px; }
           .chat-header h2 { font-size: 16px; }
         }
       `}</style>
-      {/* --- UPDATED CSS END --- */}
 
       <div className="chat-card">
         <div className="chat-header">
@@ -333,13 +318,39 @@ export default function App() {
               {connected ? `${otherUsersCount} others online` : "Connecting..."}
             </div>
           </div>
-          {socketRef.current?.id && (
-            <img
-              src={`https://api.dicebear.com/7.x/notionists/svg?seed=${socketRef.current.id}&backgroundColor=b6e3f4,c0aede,d1d4f9`}
-              alt="My Avatar"
-              style={{ width: 36, height: 36, borderRadius: "50%" }}
-            />
-          )}
+
+          <div className="header-controls">
+            {/* MUTE / UNMUTE BUTTON */}
+            <button 
+              className="icon-btn" 
+              onClick={toggleMute} 
+              title={isMuted ? "Unmute sounds" : "Mute sounds"}
+              aria-label={isMuted ? "Unmute" : "Mute"}
+            >
+              {isMuted ? (
+                // Muted Icon (Speaker with Cross)
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M11 5L6 9H2v6h4l5 4V5z"></path>
+                  <line x1="23" y1="9" x2="17" y2="15"></line>
+                  <line x1="17" y1="9" x2="23" y2="15"></line>
+                </svg>
+              ) : (
+                // Active Icon (Speaker with Waves)
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                  <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                </svg>
+              )}
+            </button>
+
+            {socketRef.current?.id && (
+              <img
+                src={`https://api.dicebear.com/7.x/notionists/svg?seed=${socketRef.current.id}&backgroundColor=b6e3f4,c0aede,d1d4f9`}
+                alt="My Avatar"
+                className="avatar"
+              />
+            )}
+          </div>
         </div>
 
         <div className="messages-area" aria-live="polite">
