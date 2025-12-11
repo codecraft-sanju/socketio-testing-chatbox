@@ -24,8 +24,21 @@ app.get("/", (req, res) => {
   res.send({ status: "ok", ts: Date.now() });
 });
 
+// track connected sockets
+const connectedSockets = new Set();
+
+function broadcastUserCounts() {
+  const total = connectedSockets.size;
+  // send total count so clients can compute "other users" if they want
+  io.emit("users_count", { total });
+}
+
 io.on("connection", (socket) => {
-  console.log(`[io] User Connected: ${socket.id}`);
+  connectedSockets.add(socket.id);
+  console.log(`[io] User Connected: ${socket.id} (total=${connectedSockets.size})`);
+
+  // notify clients about counts
+  broadcastUserCounts();
 
   // forward incoming messages to everyone else
   socket.on("send_message", (data, ack) => {
@@ -53,16 +66,13 @@ io.on("connection", (socket) => {
   });
 
   // TYPING INDICATOR
-  // payload can be { typing: true } or { typing: false }
+  // payload can be { typing: true } or { typing: false, displayName: '...' }
   socket.on("typing", (payload) => {
     try {
-      // sanitize
       const isTyping = !!(payload && payload.typing);
-      // broadcast to everyone except the origin socket
       socket.broadcast.emit("user_typing", {
         socketId: socket.id,
         typing: isTyping,
-        // optionally you can send a displayName if provided by client
         displayName: payload && payload.displayName ? String(payload.displayName) : undefined,
         ts: Date.now(),
       });
@@ -72,9 +82,12 @@ io.on("connection", (socket) => {
   });
 
   socket.on("disconnect", (reason) => {
-    console.log(`[io] Disconnected: ${socket.id}, reason=${reason}`);
+    connectedSockets.delete(socket.id);
+    console.log(`[io] Disconnected: ${socket.id}, reason=${reason} (total=${connectedSockets.size})`);
     // notify others that this user stopped typing (cleanup)
     socket.broadcast.emit("user_typing", { socketId: socket.id, typing: false });
+    // update counts
+    broadcastUserCounts();
   });
 });
 
