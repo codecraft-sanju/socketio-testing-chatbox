@@ -37,7 +37,7 @@ export default function App() {
 
   // --- SOCKET CONNECTION ---
   useEffect(() => {
-    const SOCKET_URL = "https://socketio-testing-chatbox.onrender.com"; 
+    const SOCKET_URL = "https://socketio-testing-chatbox.onrender.com"; // change if needed
 
     const socket = ioClient(SOCKET_URL, {
       transports: ["websocket"],
@@ -260,6 +260,14 @@ export default function App() {
         }
         @media (max-width:600px) {
           .app-container { padding:0; }
+          .chat-card { height:100dvh; max-width:100%; border-radius:0; }
+          .avatar { width:32px; height:32px; }
+          /* On narrow screens allow bubbles to take most of the width but prevent collapsing into a thin column */
+          .bubble { max-width: calc(100% - 72px); font-size:15px; width: auto; display: inline-block; min-width: 88px; }
+          .message-group { flex-wrap: nowrap; }
+          .message-group.mine { justify-content: flex-end; }
+          .chat-header h2 { font-size:16px; }
+        }
           .chat-card { height:100dvh; max-width:100%; border-radius:0; }
           .avatar { width:32px; height:32px; }
           .bubble { max-width: calc(100% - 72px); font-size:15px; }
