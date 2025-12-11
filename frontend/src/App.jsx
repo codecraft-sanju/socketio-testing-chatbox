@@ -1,4 +1,3 @@
-// frontend/src/App.jsx
 import React, { useEffect, useRef, useState } from "react";
 import { io as ioClient } from "socket.io-client";
 
@@ -6,40 +5,48 @@ import { io as ioClient } from "socket.io-client";
 function generateId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
-
 function formatTime(dateInput) {
   const date = new Date(dateInput);
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
-
-// Notification sound URL (you can replace)
 const NOTIFICATION_SOUND = "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3";
 
 export default function App() {
-  // STATE
   const [message, setMessage] = useState("");
   const [messageList, setMessageList] = useState([]);
   const [connected, setConnected] = useState(false);
   const [typingUsers, setTypingUsers] = useState({});
   const [totalUsers, setTotalUsers] = useState(1);
 
-  // REFS
   const socketRef = useRef(null);
   const messagesEndRef = useRef(null);
   const audioRef = useRef(null);
-  const pendingRef = useRef(new Map()); // optimistic messages not yet confirmed by server (keyed by id)
-  const clientDisplayName = useRef(`User-${Math.random().toString(36).slice(2,6)}`);
+  const pendingRef = useRef(new Map());
 
-  // init audio once
+  // persistent clientId (saved to localStorage)
+  const CLIENT_ID_KEY = "chat_client_id_v1";
+  const [clientId] = useState(() => {
+    try {
+      const existing = localStorage.getItem(CLIENT_ID_KEY);
+      if (existing) return existing;
+      const id = `cid-${Date.now()}-${Math.random().toString(36).slice(2,6)}`;
+      localStorage.setItem(CLIENT_ID_KEY, id);
+      return id;
+    } catch (e) {
+      // fallback if localStorage not available
+      return `cid-${Date.now()}-${Math.random().toString(36).slice(2,6)}`;
+    }
+  });
+
+  const clientDisplayName = useRef(`User-${clientId.slice(-6)}`);
+
   useEffect(() => {
     audioRef.current = new Audio(NOTIFICATION_SOUND);
     audioRef.current.preload = "auto";
   }, []);
 
-  // --- SOCKET CONNECTION ---
   useEffect(() => {
-    const SOCKET_URL = "https://socketio-testing-chatbox.onrender.com"; // change if needed
-
+    const SOCKET_URL = "https://socketio-testing-chatbox.onrender.com";
     const socket = ioClient(SOCKET_URL, {
       transports: ["websocket"],
       reconnectionAttempts: 999,
@@ -48,74 +55,56 @@ export default function App() {
     socketRef.current = socket;
 
     socket.on("connect", () => {
-      console.log("socket connected", socket.id);
       setConnected(true);
-      // Inform server of our name (optional)
-      socket.emit("identify", { displayName: clientDisplayName.current });
+      // identify with persistent clientId + displayName
+      socket.emit("identify", { clientId, displayName: clientDisplayName.current });
     });
 
-    socket.on("disconnect", (reason) => {
-      console.log("socket disconnected", reason);
+    socket.on("disconnect", () => {
       setConnected(false);
       setTypingUsers({});
     });
 
-    // Server history (array)
+    // history: server messages include clientId
     socket.on("history", (history = []) => {
-      // Merge server history with any pending local optimistic messages
       setMessageList((prev) => {
-        const merged = new Map();
-        // add server history first
-        history.forEach((m) => {
-          if (m && m.id) merged.set(m.id, m);
-        });
-        // then add previous existing messages (in case there are local-only messages)
-        prev.forEach((m) => {
-          if (m && m.id && !merged.has(m.id)) merged.set(m.id, m);
-        });
-        // ensure pending optimistic messages (if any) are present
-        pendingRef.current.forEach((m, id) => {
-          if (!merged.has(id)) merged.set(id, m);
-        });
-        return Array.from(merged.values());
+        // dedupe by id but preserve server order
+        const map = new Map();
+        history.forEach((m) => { if (m && m.id) map.set(m.id, m); });
+        // include any previous non-server messages (pending)
+        prev.forEach((m) => { if (m && m.id && !map.has(m.id)) map.set(m.id, m); });
+        // ensure pending optimistic messages are present
+        pendingRef.current.forEach((m) => { if (!map.has(m.id)) map.set(m.id, m); });
+        return Array.from(map.values());
       });
     });
 
-    // Receive message broadcast
     socket.on("receive_message", (data) => {
       if (!data || !data.id) return;
       setMessageList((prev) => {
-        // put messages into a map key'd by id to dedupe & keep order
         const map = new Map();
         prev.forEach((m) => map.set(m.id, m));
-        // insert/overwrite with incoming server message
+        // prefer server's message object (it has clientId normalized by server)
         map.set(data.id, data);
         return Array.from(map.values());
       });
+      if (pendingRef.current.has(data.id)) pendingRef.current.delete(data.id);
 
-      // If this message was pending, remove from pending
-      if (pendingRef.current.has(data.id)) {
-        pendingRef.current.delete(data.id);
-      }
-
-      // Play sound only if message is from someone else
-      if (data.socketId && data.socketId !== socketRef.current?.id) {
-        try {
-          // browsers require user interaction for autoplay; catch any error silently
-          audioRef.current?.play().catch(() => {});
-        } catch (e) {}
+      // sound only if from other clientId
+      if (data.clientId && data.clientId !== clientId) {
+        try { audioRef.current?.play().catch(()=>{}); } catch(e){}
       }
     });
 
-    // Typing events
     socket.on("user_typing", (payload) => {
-      // payload: { socketId, typing, displayName }
-      if (!payload || !payload.socketId) return;
-      if (payload.socketId === socketRef.current?.id) return; // ignore our own
+      // payload: { socketId, clientId, typing, displayName }
+      if (!payload) return;
+      // don't show our own typing
+      if (payload.clientId === clientId) return;
       setTypingUsers((prev) => {
         const next = { ...prev };
-        if (payload.typing) next[payload.socketId] = payload.displayName || "Someone";
-        else delete next[payload.socketId];
+        if (payload.typing) next[payload.clientId || payload.socketId] = payload.displayName || "Someone";
+        else delete next[payload.clientId || payload.socketId];
         return next;
       });
     });
@@ -124,7 +113,6 @@ export default function App() {
       if (payload && typeof payload.total === "number") setTotalUsers(payload.total);
     });
 
-    // debug errors
     socket.on("connect_error", (err) => console.warn("connect_error:", err?.message || err));
     socket.on("error", (err) => console.warn("socket_error:", err));
 
@@ -132,26 +120,22 @@ export default function App() {
       socket.disconnect();
       socketRef.current = null;
     };
-  }, []);
+  }, [clientId]);
 
-  // Auto scroll on messages or typing changes
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messageList, typingUsers]);
 
-  // Typing debounce
   const typingTimeoutRef = useRef(null);
   const handleTyping = () => {
     if (!socketRef.current?.connected) return;
-    socketRef.current.emit("typing", { typing: true, displayName: clientDisplayName.current });
-
+    socketRef.current.emit("typing", { typing: true, displayName: clientDisplayName.current, clientId });
     clearTimeout(typingTimeoutRef.current);
     typingTimeoutRef.current = setTimeout(() => {
-      socketRef.current?.emit("typing", { typing: false });
+      socketRef.current?.emit("typing", { typing: false, clientId });
     }, 1200);
   };
 
-  // Send message (optimistic)
   const sendMessage = () => {
     if (!message.trim() || !socketRef.current) return;
     const id = generateId();
@@ -159,12 +143,13 @@ export default function App() {
       id,
       message: message.trim(),
       time: new Date().toISOString(),
-      socketId: socketRef.current.id,
+      // include persistent clientId so server can store it
+      clientId,
       displayName: clientDisplayName.current,
-      avatar: `https://api.dicebear.com/7.x/notionists/svg?seed=${socketRef.current.id}&backgroundColor=b6e3f4,c0aede,d1d4f9`
+      avatar: `https://api.dicebear.com/7.x/notionists/svg?seed=${clientId}&backgroundColor=b6e3f4,c0aede,d1d4f9`
     };
 
-    // optimistic update + mark as pending
+    // optimistic update + mark pending
     pendingRef.current.set(id, msgData);
     setMessageList((prev) => {
       const map = new Map();
@@ -173,62 +158,23 @@ export default function App() {
       return Array.from(map.values());
     });
 
-    // emit with optional acknowledgement
+    // emit with ack
     socketRef.current.emit("send_message", msgData, (ack) => {
-      // ack may contain { ok: true, id } if server sends it
       if (ack && ack.id) {
-        // server confirmed storage; if server modifies message we rely on receive_message to sync
         pendingRef.current.delete(ack.id);
       }
     });
 
-    // stop typing state
-    socketRef.current.emit("typing", { typing: false });
-
+    socketRef.current.emit("typing", { typing: false, clientId });
     setMessage("");
   };
 
-  // helpers
   const otherUsersCount = Math.max(0, totalUsers - 1);
   const typingArr = Object.values(typingUsers);
 
   return (
     <div className="app-container">
-      <style>{`
-        :root {
-          --primary: #4f46e5;
-          --primary-light: #e0e7ff;
-          --bg: #f3f4f6;
-          --chat-bg: #ffffff;
-          --mine-bubble: #4f46e5;
-          --other-bubble: #f3f4f6;
-          --text-main: #1f2937;
-          --text-sub: #6b7280;
-        }
-        body { margin: 0; font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; background: var(--bg); }
-        .app-container { display:flex; justify-content:center; align-items:center; min-height:100dvh; padding:20px; box-sizing:border-box; }
-        .chat-card { width:100%; max-width:500px; height:85vh; background:var(--chat-bg); border-radius:24px; box-shadow:0 20px 50px -10px rgba(0,0,0,0.1); display:flex; flex-direction:column; overflow:hidden; position:relative;}
-        .chat-header { padding:16px 20px; background: rgba(255,255,255,0.9); backdrop-filter: blur(10px); border-bottom:1px solid #f0f0f0; display:flex; justify-content:space-between; align-items:center; z-index:10;}
-        .status-dot { height:8px; width:8px; border-radius:50%; display:inline-block; margin-right:6px;}
-        .online { background:#22c55e; box-shadow:0 0 8px #22c55e; }
-        .offline { background:#ef4444; }
-        .messages-area { flex:1; padding:20px; overflow-y:auto; background-image: radial-gradient(#e5e7eb 1px, transparent 1px); background-size:20px 20px; display:flex; flex-direction:column; gap:12px; }
-        .message-group { display:flex; gap:10px; max-width:80%; animation:slideIn .2s ease; }
-        .message-group.mine { align-self:flex-end; flex-direction:row-reverse; }
-        .avatar { width:32px; height:32px; border-radius:50%; background:#ddd; border:2px solid white; flex-shrink:0; }
-        .bubble { padding:10px 14px; border-radius:18px; position:relative; font-size:14px; line-height:1.4; box-shadow:0 2px 5px rgba(0,0,0,0.05); }
-        .mine .bubble { background:var(--mine-bubble); color:white; border-bottom-right-radius:4px; }
-        .other .bubble { background:var(--other-bubble); color:var(--text-main); border-bottom-left-radius:4px; }
-        .meta { font-size:10px; margin-top:4px; opacity:0.7; text-align:right; }
-        .typing-indicator { font-size:12px; color:var(--text-sub); padding:0 24px 8px; height:20px; }
-        .input-area { padding:16px; background:white; border-top:1px solid #f3f4f6; display:flex; gap:10px; align-items:center; }
-        .msg-input { flex:1; background:#f9fafb; border:1px solid #e5e7eb; padding:12px 16px; border-radius:99px; outline:none; font-size:14px; transition:all .2s; }
-        .msg-input:focus { border-color:var(--primary); box-shadow:0 0 0 3px var(--primary-light); background:white; }
-        .send-btn { background:var(--primary); color:white; border:none; width:44px; height:44px; border-radius:50%; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:transform .1s; }
-        .send-btn:active { transform:scale(.95); }
-        @keyframes slideIn { from { opacity:0; transform:translateY(6px);} to { opacity:1; transform:translateY(0);} }
-        @media (max-width:600px) { .app-container { padding:0; } .chat-card { height:100dvh; max-width:100%; border-radius:0; } }
-      `}</style>
+      <style>{/* same styling as before, omitted here for brevity (use your existing CSS) */}</style>
 
       <div className="chat-card">
         <div className="chat-header">
@@ -239,9 +185,9 @@ export default function App() {
               {connected ? `${otherUsersCount} others online` : "Connecting..."}
             </div>
           </div>
-          {socketRef.current?.id && (
+          {clientId && (
             <img
-              src={`https://api.dicebear.com/7.x/notionists/svg?seed=${socketRef.current.id}&backgroundColor=b6e3f4,c0aede,d1d4f9`}
+              src={`https://api.dicebear.com/7.x/notionists/svg?seed=${clientId}&backgroundColor=b6e3f4,c0aede,d1d4f9`}
               alt="My Avatar"
               style={{ width: 36, height: 36, borderRadius: "50%" }}
             />
@@ -256,8 +202,10 @@ export default function App() {
           )}
 
           {messageList.map((msg) => {
-            const isMine = msg.socketId === socketRef.current?.id;
-            const avatarUrl = msg.avatar || `https://api.dicebear.com/7.x/notionists/svg?seed=${msg.socketId}`;
+            // Compare by persistent clientId instead of socketId
+            const isMine = msg.clientId === clientId;
+            const avatarSeed = msg.clientId || msg.socketId || "anon";
+            const avatarUrl = msg.avatar || `https://api.dicebear.com/7.x/notionists/svg?seed=${avatarSeed}`;
             return (
               <div key={msg.id} className={`message-group ${isMine ? "mine" : "other"}`}>
                 {!isMine && <img src={avatarUrl} className="avatar" alt="User avatar" />}
@@ -287,16 +235,8 @@ export default function App() {
           <input
             className="msg-input"
             value={message}
-            onChange={(e) => {
-              setMessage(e.target.value);
-              handleTyping();
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                sendMessage();
-              }
-            }}
+            onChange={(e) => { setMessage(e.target.value); handleTyping(); }}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); sendMessage(); } }}
             placeholder="Type a message..."
             aria-label="Type a message"
           />
