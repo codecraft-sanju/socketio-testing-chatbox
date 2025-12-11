@@ -6,14 +6,13 @@ const cors = require("cors");
 const app = express();
 app.use(cors());
 
-// NOTE: Jab production pe daalo toh isse apna frontend URL replace karna
 const CLIENT_URL = "https://socketio-testing-chatbox.vercel.app";
 
 const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: "*", // Testing ke liye '*' rakha hai, production mein CLIENT_URL use karein
+    origin: CLIENT_URL, 
     methods: ["GET", "POST"],
   },
 });
@@ -49,8 +48,8 @@ io.on("connection", (socket) => {
       messageHistory.push(data);
       if (messageHistory.length > 50) messageHistory.shift();
 
-      // Broadcast to everyone else
-      socket.broadcast.emit("receive_message", data);
+      // Broadcast to everyone (including sender) so message is permanent for all
+      io.emit("receive_message", data);
 
       if (ack) ack({ ok: true, id: data.id });
     } catch (e) {
