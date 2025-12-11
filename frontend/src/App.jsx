@@ -2,7 +2,7 @@
 import { useEffect, useState, useRef } from "react";
 import io from "socket.io-client";
 
-const socket = io("http://localhost:3001");
+const socket = io("https://socketio-testing-chatbox.onrender.com");
 
 function generateId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -22,7 +22,7 @@ function App() {
     socket.on("connect", () => {
       setConnected(true);
       console.log("Connected:", socket.id);
-    });
+    });    
 
     socket.on("disconnect", () => {
       setConnected(false);
