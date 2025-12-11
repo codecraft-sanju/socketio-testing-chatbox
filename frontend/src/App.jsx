@@ -95,7 +95,6 @@ function ChatRoom({ username, onLogout }) {
   const [connected, setConnected] = useState(false);
   const [typingUsers, setTypingUsers] = useState({});
   const [totalUsers, setTotalUsers] = useState(1);
-  
   const [showLogout, setShowLogout] = useState(false);
   const [isMuted, setIsMuted] = useState(() => localStorage.getItem("chat_muted") === "true");
 
@@ -108,11 +107,13 @@ function ChatRoom({ username, onLogout }) {
   const clientDisplayName = useRef(username); 
   const isMutedRef = useRef(isMuted);
 
+  // Sync Ref
   useEffect(() => {
     isMutedRef.current = isMuted;
     localStorage.setItem("chat_muted", isMuted);
   }, [isMuted]);
 
+  // Init audio
   useEffect(() => {
     audioRef.current = new Audio(NOTIFICATION_SOUND);
     audioRef.current.preload = "auto";
@@ -132,11 +133,13 @@ function ChatRoom({ username, onLogout }) {
     socketRef.current = socket;
 
     socket.on("connect", () => {
+      console.log("socket connected", socket.id);
       setConnected(true);
       socket.emit("identify", { displayName: clientDisplayName.current });
     });
 
-    socket.on("disconnect", () => {
+    socket.on("disconnect", (reason) => {
+      console.log("socket disconnected", reason);
       setConnected(false);
       setTypingUsers({});
     });
@@ -192,7 +195,7 @@ function ChatRoom({ username, onLogout }) {
     };
   }, []);
 
-  // Auto scroll
+  // Auto scroll (Includes typingUsers now so it scrolls when typing starts)
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messageList, typingUsers]);
@@ -318,25 +321,26 @@ function ChatRoom({ username, onLogout }) {
               </div>
             );
           })}
+
+          {/* --- MOVED TYPING INDICATOR HERE --- */}
+          {typingArr.length > 0 && (
+            <div className="typing-indicator-inline">
+               <div className="typing-dots">
+                  <span></span><span></span><span></span>
+               </div>
+               <span style={{ marginLeft: 8 }}>
+                 <span style={{ fontWeight: 600 }}>
+                   {typingArr.length > 2 ? "Several people" : typingArr.join(", ")}
+                 </span> is typing...
+               </span>
+            </div>
+          )}
+          
           <div ref={messagesEndRef} />
         </div>
 
-        {/* INPUT AREA (Changed: Typing indicator moved INSIDE here) */}
+        {/* FOOTER */}
         <div className="input-area">
-          
-          {/* UPDATED TYPING INDICATOR LOCATION */}
-          <div className="typing-indicator">
-            {typingArr.length > 0 && (
-              <span>
-                <span style={{ fontWeight: 600 }}>
-                  {typingArr.length > 2 ? "Several people" : typingArr.join(", ")}
-                </span>{" "}
-                is typing...
-              </span>
-            )}
-          </div>
-          {/* ---------------------------------- */}
-
           <textarea
             className="msg-input"
             value={message}
@@ -367,7 +371,7 @@ function ChatRoom({ username, onLogout }) {
   );
 }
 
-// --- STYLES (Updated for better typing positioning) ---
+// --- STYLES (Updated for inline typing) ---
 const StyleSheet = () => (
   <style>{`
     :root {
@@ -395,13 +399,8 @@ const StyleSheet = () => (
       display:flex; flex-direction:column; overflow:hidden; position:relative;
     }
 
-    /* LOGIN CARD SPECIAL STYLE */
     .login-card {
-      height: auto;
-      min-height: 400px;
-      justify-content: center;
-      align-items: center;
-      padding: 40px;
+      height: auto; min-height: 400px; justify-content: center; align-items: center; padding: 40px;
     }
 
     .chat-header { 
@@ -452,21 +451,24 @@ const StyleSheet = () => (
     .meta { font-size: 10px; margin-top: 4px; opacity: 0.7; text-align: right; display: block; margin-bottom: -2px; }
     .bubble.pending { opacity:0.8; }
 
-    /* --- UPDATED TYPING INDICATOR CSS --- */
-    .typing-indicator { 
-      position: absolute; 
-      top: -30px; 
-      left: 20px; 
-      font-size:12px; 
-      color:var(--text-sub); 
-      height: 20px;
-      pointer-events: none; /* Click through */
+    /* --- UPDATED TYPING STYLES --- */
+    .typing-indicator-inline {
+      display: flex; align-items: center; gap: 8px;
+      margin-left: 10px; margin-bottom: 5px;
+      font-size: 12px; color: var(--text-sub);
+      animation: slideIn .2s ease;
     }
+    .typing-dots { display: flex; gap: 3px; align-items: center; }
+    .typing-dots span {
+       width: 4px; height: 4px; background: #9ca3af; border-radius: 50%;
+       animation: bounce 1.4s infinite ease-in-out both;
+    }
+    .typing-dots span:nth-child(1) { animation-delay: -0.32s; }
+    .typing-dots span:nth-child(2) { animation-delay: -0.16s; }
     
     .input-area { 
       padding:12px 16px; background:white; border-top:1px solid #f3f4f6; 
       display:flex; gap:10px; align-items:flex-end; 
-      position: relative; /* Essential for absolute positioning of typing indicator */
     }
     
     .msg-input { 
@@ -485,6 +487,7 @@ const StyleSheet = () => (
     .send-btn:active { transform:scale(.95); }
 
     @keyframes slideIn { from { opacity:0; transform:translateY(10px);} to { opacity:1; transform:translateY(0);} }
+    @keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
 
     @media (max-width: 900px) { .chat-card { max-width: 640px; height: 90vh; } }
     @media (max-width: 600px) {
