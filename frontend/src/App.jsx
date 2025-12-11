@@ -42,12 +42,10 @@ export default function App() {
     setIsLoggedIn(true);
   };
 
-  // 3. Handle Logout (NEW FUNCTION)
+  // 3. Handle Logout
   const handleLogout = () => {
-    // Token aur details delete karo
     localStorage.removeItem("chat_app_token");
     localStorage.removeItem("chat_app_username");
-    // State reset karo
     setIsLoggedIn(false);
     setUsername("");
     setInputName("");
@@ -86,7 +84,6 @@ export default function App() {
     );
   }
 
-  // LOGGED IN -> SHOW CHAT (Pass handleLogout prop)
   return <ChatRoom username={username} onLogout={handleLogout} />;
 }
 
@@ -99,10 +96,7 @@ function ChatRoom({ username, onLogout }) {
   const [typingUsers, setTypingUsers] = useState({});
   const [totalUsers, setTotalUsers] = useState(1);
   
-  // NEW STATE FOR LOGOUT MENU
   const [showLogout, setShowLogout] = useState(false);
-
-  // MUTE STATE
   const [isMuted, setIsMuted] = useState(() => localStorage.getItem("chat_muted") === "true");
 
   // REFS
@@ -114,13 +108,11 @@ function ChatRoom({ username, onLogout }) {
   const clientDisplayName = useRef(username); 
   const isMutedRef = useRef(isMuted);
 
-  // Sync Ref
   useEffect(() => {
     isMutedRef.current = isMuted;
     localStorage.setItem("chat_muted", isMuted);
   }, [isMuted]);
 
-  // Init audio
   useEffect(() => {
     audioRef.current = new Audio(NOTIFICATION_SOUND);
     audioRef.current.preload = "auto";
@@ -140,13 +132,11 @@ function ChatRoom({ username, onLogout }) {
     socketRef.current = socket;
 
     socket.on("connect", () => {
-      console.log("socket connected", socket.id);
       setConnected(true);
       socket.emit("identify", { displayName: clientDisplayName.current });
     });
 
-    socket.on("disconnect", (reason) => {
-      console.log("socket disconnected", reason);
+    socket.on("disconnect", () => {
       setConnected(false);
       setTypingUsers({});
     });
@@ -266,7 +256,6 @@ function ChatRoom({ username, onLogout }) {
           </div>
 
           <div className="header-controls">
-             {/* Logged in as... */}
              <div style={{fontSize: 12, marginRight: 10, fontWeight: 600, color: '#4f46e5'}}>
                 {username}
              </div>
@@ -278,50 +267,33 @@ function ChatRoom({ username, onLogout }) {
               )}
             </button>
             
-            {/* --- AVATAR & LOGOUT MENU AREA --- */}
             <div style={{ position: 'relative' }}>
                 <img
                   src={`https://api.dicebear.com/7.x/notionists/svg?seed=${username}&backgroundColor=b6e3f4,c0aede,d1d4f9`}
                   alt="My Avatar"
                   className="avatar"
-                  // CLICK ON AVATAR TOGGLES MENU
                   onClick={() => setShowLogout(!showLogout)}
                   style={{ cursor: "pointer", border: showLogout ? "2px solid #ef4444" : "2px solid white" }}
                 />
                 
-                {/* LOGOUT BUTTON DROPDOWN */}
                 {showLogout && (
                   <button 
                     onClick={onLogout}
                     style={{
-                      position: 'absolute',
-                      top: '45px',
-                      right: '0',
-                      background: '#fff',
-                      border: '1px solid #e5e7eb',
-                      padding: '8px 12px',
-                      borderRadius: '8px',
-                      boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-                      color: '#ef4444',
-                      fontWeight: 600,
-                      fontSize: '13px',
-                      cursor: 'pointer',
-                      whiteSpace: 'nowrap',
-                      zIndex: 100
+                      position: 'absolute', top: '45px', right: '0', background: '#fff', border: '1px solid #e5e7eb',
+                      padding: '8px 12px', borderRadius: '8px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+                      color: '#ef4444', fontWeight: 600, fontSize: '13px', cursor: 'pointer', whiteSpace: 'nowrap', zIndex: 100
                     }}
                   >
                     Logout ↪
                   </button>
                 )}
             </div>
-            {/* ------------------------------- */}
-
           </div>
         </div>
 
         {/* MESSAGES */}
         <div className="messages-area" onClick={() => setShowLogout(false)}> 
-        {/* Clicking chat area closes menu */}
           {messageList.length === 0 && (
             <div style={{ textAlign: "center", marginTop: 40, color: "#9ca3af", fontSize: 14 }}>
               Welcome, {username}! Say Hi! 👋
@@ -349,19 +321,22 @@ function ChatRoom({ username, onLogout }) {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* FOOTER */}
-        <div className="typing-indicator">
-          {typingArr.length > 0 && (
-            <span>
-              <span style={{ fontWeight: 600 }}>
-                {typingArr.length > 2 ? "Several people" : typingArr.join(", ")}
-              </span>{" "}
-              is typing...
-            </span>
-          )}
-        </div>
-
+        {/* INPUT AREA (Changed: Typing indicator moved INSIDE here) */}
         <div className="input-area">
+          
+          {/* UPDATED TYPING INDICATOR LOCATION */}
+          <div className="typing-indicator">
+            {typingArr.length > 0 && (
+              <span>
+                <span style={{ fontWeight: 600 }}>
+                  {typingArr.length > 2 ? "Several people" : typingArr.join(", ")}
+                </span>{" "}
+                is typing...
+              </span>
+            )}
+          </div>
+          {/* ---------------------------------- */}
+
           <textarea
             className="msg-input"
             value={message}
@@ -392,7 +367,7 @@ function ChatRoom({ username, onLogout }) {
   );
 }
 
-// --- STYLES (Extracted to keep code clean) ---
+// --- STYLES (Updated for better typing positioning) ---
 const StyleSheet = () => (
   <style>{`
     :root {
@@ -477,11 +452,21 @@ const StyleSheet = () => (
     .meta { font-size: 10px; margin-top: 4px; opacity: 0.7; text-align: right; display: block; margin-bottom: -2px; }
     .bubble.pending { opacity:0.8; }
 
-    .typing-indicator { font-size:12px; color:var(--text-sub); padding:0 24px 8px; height:20px; min-height:20px; }
+    /* --- UPDATED TYPING INDICATOR CSS --- */
+    .typing-indicator { 
+      position: absolute; 
+      top: -30px; 
+      left: 20px; 
+      font-size:12px; 
+      color:var(--text-sub); 
+      height: 20px;
+      pointer-events: none; /* Click through */
+    }
     
     .input-area { 
       padding:12px 16px; background:white; border-top:1px solid #f3f4f6; 
       display:flex; gap:10px; align-items:flex-end; 
+      position: relative; /* Essential for absolute positioning of typing indicator */
     }
     
     .msg-input { 
