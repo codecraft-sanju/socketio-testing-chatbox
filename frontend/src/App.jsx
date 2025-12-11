@@ -19,6 +19,7 @@ export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [username, setUsername] = useState("");
   const [inputName, setInputName] = useState("");
+  const [shakeError, setShakeError] = useState(false); // For error animation
 
   // 1. Check LocalStorage on Load
   useEffect(() => {
@@ -33,7 +34,11 @@ export default function App() {
 
   // 2. Handle Signup
   const handleLogin = () => {
-    if (!inputName.trim()) return alert("Please enter your name!");
+    if (!inputName.trim()) {
+      setShakeError(true);
+      setTimeout(() => setShakeError(false), 500); // Reset shake after 500ms
+      return;
+    }
     
     localStorage.setItem("chat_app_token", FIX_TOKEN);
     localStorage.setItem("chat_app_username", inputName.trim());
@@ -51,32 +56,47 @@ export default function App() {
     setInputName("");
   };
 
-  // --- RENDER ---
+  // --- RENDER LOGIN (ADVANCED UI) ---
   if (!isLoggedIn) {
+    const previewSeed = inputName.trim() || "guest";
+    const avatarUrl = `https://api.dicebear.com/7.x/notionists/svg?seed=${previewSeed}&backgroundColor=b6e3f4,c0aede,d1d4f9`;
+
     return (
-      <div className="app-container">
+      <div className="login-wrapper">
         <StyleSheet /> 
-        <div className="chat-card login-card">
-          <div style={{ textAlign: 'center', width: '100%' }}>
-            <h1 style={{ color: '#4f46e5', marginBottom: 10 }}>Welcome 👋</h1>
-            <p style={{ color: '#6b7280', marginBottom: 30 }}>Enter your name to join the chat</p>
+        
+        {/* Animated Background Shapes */}
+        <div className="shape shape-1"></div>
+        <div className="shape shape-2"></div>
+
+        <div className={`glass-card ${shakeError ? "shake-anim" : ""}`}>
+          <div className="avatar-preview-container">
+            <img src={avatarUrl} alt="Avatar Preview" className="avatar-preview" />
+            <span className="online-badge"></span>
+          </div>
+
+          <div className="login-content">
+            <h1 className="welcome-title">Hello There! 👋</h1>
+            <p className="welcome-subtitle">Join the public lounge to start chatting.</p>
             
-            <input 
-              className="msg-input" 
-              style={{ width: '70%', textAlign: 'center', fontSize: '1.1rem', marginBottom: 20 }}
-              placeholder="What's your name?"
-              value={inputName}
-              onChange={(e) => setInputName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
-              autoFocus
-            />
-            <br />
-            <button 
-              className="send-btn" 
-              style={{ width: '70%', borderRadius: '24px', height: '50px', fontSize: '1rem', fontWeight: 600 }}
-              onClick={handleLogin}
-            >
-              Start Chatting
+            <div className="input-group">
+              <input 
+                className="modern-input" 
+                placeholder="Enter your nickname..."
+                value={inputName}
+                onChange={(e) => setInputName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+                autoFocus
+                maxLength={15}
+              />
+              <span className="input-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+              </span>
+            </div>
+
+            <button className="modern-btn" onClick={handleLogin}>
+              Join Chat Room 
+              <svg style={{marginLeft:8}} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
             </button>
           </div>
         </div>
@@ -87,7 +107,7 @@ export default function App() {
   return <ChatRoom username={username} onLogout={handleLogout} />;
 }
 
-// --- CHAT ROOM COMPONENT ---
+// --- CHAT ROOM COMPONENT (UNCHANGED) ---
 function ChatRoom({ username, onLogout }) {
   // STATE
   const [message, setMessage] = useState("");
@@ -195,7 +215,7 @@ function ChatRoom({ username, onLogout }) {
     };
   }, []);
 
-  // Auto scroll (Includes typingUsers now so it scrolls when typing starts)
+  // Auto scroll
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messageList, typingUsers]);
@@ -322,7 +342,7 @@ function ChatRoom({ username, onLogout }) {
             );
           })}
 
-          {/* --- MOVED TYPING INDICATOR HERE --- */}
+          {/* INLINE TYPING INDICATOR */}
           {typingArr.length > 0 && (
             <div className="typing-indicator-inline">
                <div className="typing-dots">
@@ -371,11 +391,12 @@ function ChatRoom({ username, onLogout }) {
   );
 }
 
-// --- STYLES (Updated for inline typing) ---
+// --- STYLES (Added Advanced Login Styles) ---
 const StyleSheet = () => (
   <style>{`
     :root {
       --primary: #4f46e5;
+      --primary-dark: #4338ca;
       --primary-light: #e0e7ff;
       --bg: #f3f4f6;
       --chat-bg: #ffffff;
@@ -385,7 +406,7 @@ const StyleSheet = () => (
       --text-sub: #6b7280;
     }
     
-    body { margin: 0; font-family: Inter, system-ui, -apple-system, sans-serif; background: var(--bg); }
+    body { margin: 0; font-family: 'Inter', system-ui, -apple-system, sans-serif; background: var(--bg); }
     
     .app-container { 
       display:flex; justify-content:center; align-items:center; 
@@ -399,18 +420,112 @@ const StyleSheet = () => (
       display:flex; flex-direction:column; overflow:hidden; position:relative;
     }
 
-    .login-card {
-      height: auto; min-height: 400px; justify-content: center; align-items: center; padding: 40px;
+    /* --- ADVANCED LOGIN CSS STARTS HERE --- */
+    .login-wrapper {
+        width: 100vw; height: 100dvh;
+        display: flex; justify-content: center; align-items: center;
+        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+        overflow: hidden; position: relative;
     }
 
+    /* Floating Shapes Background */
+    .shape { position: absolute; border-radius: 50%; opacity: 0.6; filter: blur(60px); z-index: 0; }
+    .shape-1 { top: -100px; left: -100px; width: 400px; height: 400px; background: #a78bfa; animation: float 8s infinite alternate; }
+    .shape-2 { bottom: -100px; right: -100px; width: 350px; height: 350px; background: #60a5fa; animation: float 10s infinite alternate-reverse; }
+
+    @keyframes float { from { transform: translate(0,0); } to { transform: translate(40px, 40px); } }
+
+    /* Glassmorphism Card */
+    .glass-card {
+        background: rgba(255, 255, 255, 0.75);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        border: 1px solid rgba(255, 255, 255, 0.8);
+        padding: 40px;
+        border-radius: 32px;
+        box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.15);
+        width: 100%; max-width: 420px;
+        text-align: center;
+        z-index: 1;
+        transition: transform 0.3s;
+    }
+
+    .avatar-preview-container {
+        position: relative; width: 100px; height: 100px; margin: 0 auto 20px;
+    }
+    .avatar-preview {
+        width: 100%; height: 100%; border-radius: 50%;
+        background: #e0e7ff; border: 4px solid white;
+        box-shadow: 0 10px 20px -5px rgba(0,0,0,0.1);
+        transition: all 0.3s ease;
+    }
+    .online-badge {
+        position: absolute; bottom: 5px; right: 5px; width: 20px; height: 20px;
+        background: #22c55e; border: 3px solid white; border-radius: 50%;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .welcome-title { margin: 0; font-size: 28px; font-weight: 800; color: #111; letter-spacing: -0.5px; }
+    .welcome-subtitle { margin: 8px 0 32px; color: #666; font-size: 15px; }
+
+    .input-group { position: relative; margin-bottom: 24px; }
+    
+    .modern-input {
+        width: 100%; box-sizing: border-box;
+        padding: 16px 16px 16px 48px; /* space for icon */
+        border-radius: 16px; border: 2px solid transparent;
+        background: #fff; font-size: 16px; font-weight: 500; color: #333;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+        transition: all 0.3s ease; outline: none;
+    }
+    .modern-input:focus {
+        border-color: var(--primary);
+        box-shadow: 0 4px 20px rgba(79, 70, 229, 0.15);
+        transform: translateY(-2px);
+    }
+    .input-icon {
+        position: absolute; left: 16px; top: 50%; transform: translateY(-50%);
+        color: #9ca3af; pointer-events: none; transition: color 0.3s;
+    }
+    .modern-input:focus + .input-icon { color: var(--primary); }
+
+    .modern-btn {
+        width: 100%; padding: 16px; border: none; border-radius: 16px;
+        background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+        color: white; font-size: 16px; font-weight: 600; cursor: pointer;
+        box-shadow: 0 10px 20px -5px rgba(79, 70, 229, 0.4);
+        transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+        display: flex; justify-content: center; align-items: center;
+    }
+    .modern-btn:hover {
+        transform: translateY(-3px) scale(1.02);
+        box-shadow: 0 15px 30px -5px rgba(79, 70, 229, 0.5);
+    }
+    .modern-btn:active { transform: translateY(-1px) scale(0.98); }
+
+    /* Shake Animation for Errors */
+    .shake-anim { animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both; }
+    @keyframes shake {
+        10%, 90% { transform: translate3d(-1px, 0, 0); }
+        20%, 80% { transform: translate3d(2px, 0, 0); }
+        30%, 50%, 70% { transform: translate3d(-4px, 0, 0); }
+        40%, 60% { transform: translate3d(4px, 0, 0); }
+    }
+    
+    @media (max-width: 600px) {
+        .glass-card { margin: 20px; padding: 30px 20px; }
+        .welcome-title { font-size: 24px; }
+    }
+    /* --- ADVANCED LOGIN CSS ENDS --- */
+
+
+    /* --- EXISTING CHAT STYLES --- */
     .chat-header { 
       padding:16px 20px; background: rgba(255,255,255,0.95); 
       backdrop-filter: blur(10px); border-bottom:1px solid #f0f0f0; 
       display:flex; justify-content:space-between; align-items:center; z-index:10;
     }
-
     .header-controls { display: flex; align-items: center; gap: 12px; }
-    
     .icon-btn {
       background: transparent; border: none; cursor: pointer;
       color: #6b7280; padding: 6px; border-radius: 50%;
@@ -418,7 +533,6 @@ const StyleSheet = () => (
       transition: background 0.2s, color 0.2s;
     }
     .icon-btn:hover { background: #f3f4f6; color: #111; }
-    
     .status-dot { height:8px; width:8px; border-radius:50%; display:inline-block; margin-right:6px;}
     .online { background:#22c55e; box-shadow:0 0 8px #22c55e; }
     .offline { background:#ef4444; }
@@ -429,29 +543,23 @@ const StyleSheet = () => (
       background-size:20px 20px; 
       display:flex; flex-direction:column; gap:12px; 
     }
-
     .message-group { display:flex; gap:10px; width: 100%; animation:slideIn .2s ease; }
     .message-group.mine { flex-direction: row-reverse; }
-
     .avatar { 
       width:36px; height:36px; border-radius:50%; background:#ddd; 
       border:2px solid white; flex-shrink:0; object-fit: cover;
     }
-
     .bubble { 
       padding: 10px 16px; border-radius: 18px; position: relative; 
       font-size: 15px; line-height: 1.5; box-shadow: 0 1px 2px rgba(0,0,0,0.06);
       width: fit-content; max-width: 75%; 
       overflow-wrap: anywhere; word-break: normal; white-space: pre-wrap; 
     }
-
     .mine .bubble { background: var(--mine-bubble); color: white; border-bottom-right-radius: 4px; }
     .other .bubble { background: var(--other-bubble); color: var(--text-main); border-bottom-left-radius: 4px; }
-
     .meta { font-size: 10px; margin-top: 4px; opacity: 0.7; text-align: right; display: block; margin-bottom: -2px; }
     .bubble.pending { opacity:0.8; }
 
-    /* --- UPDATED TYPING STYLES --- */
     .typing-indicator-inline {
       display: flex; align-items: center; gap: 8px;
       margin-left: 10px; margin-bottom: 5px;
@@ -470,7 +578,6 @@ const StyleSheet = () => (
       padding:12px 16px; background:white; border-top:1px solid #f3f4f6; 
       display:flex; gap:10px; align-items:flex-end; 
     }
-    
     .msg-input { 
       flex:1; background:#f9fafb; border:1px solid #e5e7eb; 
       padding:12px 16px; border-radius:24px; outline:none; font-size:15px; 
@@ -489,14 +596,12 @@ const StyleSheet = () => (
     @keyframes slideIn { from { opacity:0; transform:translateY(10px);} to { opacity:1; transform:translateY(0);} }
     @keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
 
-    @media (max-width: 900px) { .chat-card { max-width: 640px; height: 90vh; } }
     @media (max-width: 600px) {
       .app-container { padding: 0; height: 100dvh; }
       .chat-card { height: 100%; max-width: 100%; border-radius: 0; box-shadow: none; }
       .avatar { width: 32px; height: 32px; }
       .bubble { max-width: 85%; font-size: 15px; }
       .chat-header h2 { font-size: 16px; }
-      .login-card { justify-content: center; }
     }
   `}</style>
 );
