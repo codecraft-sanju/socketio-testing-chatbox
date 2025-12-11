@@ -216,10 +216,12 @@ export default function App() {
         .message-group.mine { align-self:flex-end; flex-direction:row-reverse; }
         .avatar { width:36px; height:36px; border-radius:50%; background:#ddd; border:2px solid white; flex-shrink:0; }
 
-        /* BUBBLE: flexible wrapping + long-word handling */
-        .bubble { padding:10px 14px; border-radius:18px; position:relative; font-size:14px; line-height:1.45; box-shadow:0 2px 5px rgba(0,0,0,0.05); white-space:pre-wrap; /* keep user's line breaks */
-          word-break:break-word; /* break long words when needed */
-          overflow-wrap:anywhere; /* strong guarantee to avoid overflow */
+        /* BUBBLE: flexible wrapping + avoid single-letter vertical stacking */
+        .bubble { padding:10px 14px; border-radius:18px; position:relative; font-size:14px; line-height:1.45; box-shadow:0 2px 5px rgba(0,0,0,0.05);
+          white-space:pre-wrap; /* preserve user line breaks */
+          word-break: normal; /* don't force break between characters */
+          overflow-wrap: break-word; /* break long words when needed but prefer natural break points */
+          hyphens: auto; /* allow hyphenation where supported */
           max-width: calc(100% - 120px); /* keep room for avatar + padding */
         }
         .mine .bubble { background:var(--mine-bubble); color:white; border-bottom-right-radius:4px; }
@@ -227,7 +229,7 @@ export default function App() {
         .meta { font-size:10px; margin-top:6px; opacity:0.8; text-align:right; }
 
         /* Show slightly faded for optimistic (pending) messages */
-        .bubble.pending { opacity:0.85; filter:grayscale(.02); }
+        .bubble.pending { opacity:0.9; filter:grayscale(.02); }
 
         .typing-indicator { font-size:12px; color:var(--text-sub); padding:0 24px 8px; height:20px; }
         .input-area { padding:12px 16px; background:white; border-top:1px solid #f3f4f6; display:flex; gap:10px; align-items:center; }
