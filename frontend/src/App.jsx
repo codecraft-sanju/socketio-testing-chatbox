@@ -118,7 +118,7 @@ export default function App() {
             {/* Theme Toggle on Login Screen too */}
             <div style={{marginTop: 20}}>
                 <button onClick={toggleTheme} className="theme-toggle-login">
-                    {theme === 'light' ? '🌙 Dark Mode' : '☀️ Light Mode'}
+                    {theme === 'light' ? ' Dark Mode' : ' Light Mode'}
                 </button>
             </div>
           </div>
