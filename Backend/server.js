@@ -5,20 +5,15 @@ const { Server } = require("socket.io");
 const cors = require("cors");
 
 const app = express();
-// allow json if needed later
 app.use(express.json());
 
-// For dev/testing: allow any origin OR set to your frontend origin
 const CLIENT_URL = process.env.CLIENT_URL || "https://socketio-testing-chatbox.vercel.app";
 
 app.use(cors({
   origin: (origin, callback) => {
-    // allow requests with no origin (curl, mobile apps)
     if (!origin) return callback(null, true);
-    // allow the configured client or allow all for easier testing
     if (origin === CLIENT_URL || process.env.ALLOW_ALL_ORIGINS === "true") return callback(null, true);
-    // otherwise block (change as necessary)
-    return callback(null, true); // <-- change to callback(new Error('Not allowed')) to be strict
+    return callback(null, true); 
   },
   methods: ["GET", "POST"],
 }));
@@ -32,15 +27,14 @@ const io = new Server(server, {
   },
 });
 
-// Simple health route
 app.get("/", (req, res) => {
   res.send({ status: "Active", clients: io.engine.clientsCount });
 });
 
 // STATE
 const connectedSockets = new Set();
-const messageHistory = []; // array of messages, last 50
-const messageIds = new Set(); // dedupe by id
+const messageHistory = []; 
+const messageIds = new Set(); 
 
 function broadcastUserCounts() {
   io.emit("users_count", { total: connectedSockets.size });
@@ -50,18 +44,45 @@ io.on("connection", (socket) => {
   console.log(`[+] User Joined: ${socket.id}`);
   connectedSockets.add(socket.id);
 
-  // Send history immediately (best-effort)
   socket.emit("history", messageHistory);
-
-  // broadcast user counts
   broadcastUserCounts();
 
-  // optional identify (store displayName for typing broadcasts)
   socket.on("identify", (payload) => {
     socket.data.displayName = payload?.displayName || `User-${socket.id.slice(0,5)}`;
   });
 
-  // handle incoming messages
+  // --- HANDLE REACTION ---
+  socket.on("message_reaction", ({ messageId, emoji }) => {
+    // Find the message
+    const msg = messageHistory.find(m => m.id === messageId);
+    if (msg) {
+        // Init reactions object if missing
+        if (!msg.reactions) msg.reactions = {};
+        
+        // Init array for specific emoji if missing
+        if (!msg.reactions[emoji]) msg.reactions[emoji] = [];
+        
+        const users = msg.reactions[emoji];
+        const userIndex = users.indexOf(socket.id);
+
+        // Toggle logic: If user already reacted, remove it. Else add it.
+        if (userIndex === -1) {
+            users.push(socket.id);
+        } else {
+            users.splice(userIndex, 1);
+        }
+
+        // Cleanup empty emoji keys to keep it clean
+        if (users.length === 0) {
+            delete msg.reactions[emoji];
+        }
+
+        // Broadcast updated reactions for this message to everyone
+        io.emit("reaction_updated", { id: messageId, reactions: msg.reactions });
+    }
+  });
+  // -----------------------
+
   socket.on("send_message", (data, ack) => {
     try {
       if (!data || !data.message) {
@@ -70,15 +91,12 @@ io.on("connection", (socket) => {
       }
       if (!data.id) data.id = Date.now().toString();
 
-      // dedupe
       if (messageIds.has(data.id)) {
         if (ack) ack({ ok: true, id: data.id });
-        // still broadcast so late joiners get it (but avoid double-storing)
         io.emit("receive_message", data);
         return;
       }
 
-      // normalize minimal fields
       const msg = {
         id: data.id,
         message: data.message,
@@ -86,18 +104,17 @@ io.on("connection", (socket) => {
         socketId: data.socketId || socket.id,
         displayName: data.displayName || socket.data.displayName || `User-${socket.id.slice(0,5)}`,
         avatar: data.avatar || null,
+        reactions: {} // New messages start with empty reactions
       };
 
-      // store
       messageHistory.push(msg);
       messageIds.add(msg.id);
-      // keep size reasonable
+      
       if (messageHistory.length > 50) {
         const removed = messageHistory.shift();
         if (removed && removed.id) messageIds.delete(removed.id);
       }
 
-      // broadcast to everyone (includes sender)
       io.emit("receive_message", msg);
 
       if (ack) ack({ ok: true, id: msg.id });
@@ -107,9 +124,7 @@ io.on("connection", (socket) => {
     }
   });
 
-  // typing
   socket.on("typing", (payload) => {
-    // payload: { typing: boolean, displayName? }
     const displayName = payload?.displayName || socket.data.displayName || `User-${socket.id.slice(0,5)}`;
     socket.broadcast.emit("user_typing", {
       socketId: socket.id,
@@ -118,11 +133,9 @@ io.on("connection", (socket) => {
     });
   });
 
-  // disconnect
   socket.on("disconnect", (reason) => {
     console.log(`[-] User Left: ${socket.id} (${reason})`);
     connectedSockets.delete(socket.id);
-    // ensure typing cleared
     socket.broadcast.emit("user_typing", { socketId: socket.id, typing: false });
     broadcastUserCounts();
   });
