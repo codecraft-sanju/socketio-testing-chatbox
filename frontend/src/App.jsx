@@ -391,7 +391,7 @@ function ChatRoom({ username, onLogout, theme, toggleTheme }) {
                   <div className="dropdown-menu">
                       <div className="menu-item" onClick={() => { toggleTheme(); }}>
                           <span style={{fontSize: 16}}>
-                            {theme === 'light' ? '🌙' : '☀️'}
+                            {theme === 'light' ? '' : ''}
                           </span>
                           <span>{theme === 'light' ? 'Dark Mode' : 'Light Mode'}</span>
                       </div>
