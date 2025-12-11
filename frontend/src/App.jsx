@@ -553,7 +553,11 @@ const StyleSheet = () => (
         border: 1px solid #e5e7eb; padding: 6px 10px;
         border-radius: 30px;
         box-shadow: 0 8px 20px rgba(0,0,0,0.15);
-        display: flex; gap: 8px; z-index: 50;
+        /* CHANGED: Use GRID for better layout control */
+        display: grid; 
+        grid-template-columns: repeat(6, 1fr); /* Desktop: 6 in a row */
+        gap: 5px; 
+        z-index: 50;
         animation: popIn 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
     }
     .mine .reaction-picker-popup { right: auto; left: 0; }
@@ -561,6 +565,7 @@ const StyleSheet = () => (
     .emoji-item {
         cursor: pointer; font-size: 20px; transition: transform 0.2s;
         padding: 4px; border-radius: 50%;
+        display: flex; justify-content: center; align-items: center;
     }
     .emoji-item:hover { transform: scale(1.3); background: #f3f4f6; }
     .emoji-item:active { transform: scale(0.9); }
@@ -611,7 +616,14 @@ const StyleSheet = () => (
       .avatar { width: 32px; height: 32px; }
       .bubble { max-width: 85%; font-size: 15px; }
       .chat-header h2 { font-size: 16px; }
-      .reaction-btn-trigger { width: 30px; height: 30px; font-size: 18px; } 
+      .reaction-btn-trigger { width: 30px; height: 30px; font-size: 18px; }
+      
+      /* --- MOBILE FIX FOR POPUP --- */
+      .reaction-picker-popup {
+          grid-template-columns: repeat(3, 1fr); /* 3 Columns on mobile (2 Rows) */
+          top: -85px; /* Adjust top position since it's now taller */
+          padding: 8px;
+      }
     }
   `}</style>
 );
