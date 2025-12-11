@@ -1,70 +1,73 @@
 import React, { useEffect, useRef, useState } from "react";
 import { io as ioClient } from "socket.io-client";
 
+// --- UTILS ---
 function generateId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-function formatTime(date = new Date()) {
-  const h = date.getHours().toString().padStart(2, "0");
-  const m = date.getMinutes().toString().padStart(2, "0");
-  return `${h}:${m}`;
+function formatTime(dateInput) {
+  const date = new Date(dateInput);
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+// Simple notification sound (Base64 URL)
+const NOTIFICATION_SOUND = "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3";
+
 export default function App() {
+  // STATE
   const [message, setMessage] = useState("");
   const [messageList, setMessageList] = useState([]);
   const [connected, setConnected] = useState(false);
-  const [typingUsers, setTypingUsers] = useState({}); // { socketId: { displayName?, ts } }
-  const [totalUsers, setTotalUsers] = useState(1); // default 1 (self)
+  const [typingUsers, setTypingUsers] = useState({}); 
+  const [totalUsers, setTotalUsers] = useState(1);
+  
+  // REFS
   const messagesEndRef = useRef(null);
   const socketRef = useRef(null);
+  const audioRef = useRef(new Audio(NOTIFICATION_SOUND));
 
-  // Scroll to latest smoothly
+  // --- EFFECT: SOCKET CONNECTION ---
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messageList, typingUsers]);
-
-  useEffect(() => {
-    // FIXED BACKEND URL
-    const SOCKET_URL = "https://socketio-testing-chatbox.onrender.com";
-
+    // BACKEND URL
+    const SOCKET_URL = "https://socketio-testing-chatbox.onrender.com"; 
+    
     const socket = ioClient(SOCKET_URL, {
       transports: ["websocket"],
-      reconnectionAttempts: 5,
+      reconnectionAttempts: 10,
     });
-
     socketRef.current = socket;
 
-    socket.on("connect", () => {
-      console.log("Connected:", socket.id);
-      setConnected(true);
-    });
-
+    // Events
+    socket.on("connect", () => setConnected(true));
+    
     socket.on("disconnect", () => {
-      console.log("Disconnected");
       setConnected(false);
-      setTypingUsers({}); // clear typing on disconnect
+      setTypingUsers({});
     });
 
+    // Load History
+    socket.on("history", (history) => {
+      setMessageList(history);
+    });
+
+    // Receive New Message
     socket.on("receive_message", (data) => {
       setMessageList((prev) => {
-        if (!data?.id) data.id = generateId();
-        const exists = prev.some((m) => m.id === data.id);
-        if (exists) return prev;
+        // Avoid duplicates
+        if (prev.some((m) => m.id === data.id)) return prev;
         return [...prev, data];
       });
-      console.log("Received:", data);
+      // Play Sound (only if page is visible interaction allowed usually)
+      try { audioRef.current.play().catch(e => {}); } catch(e){}
     });
 
-    // HANDLE TYPING EVENTS FROM OTHERS
     socket.on("user_typing", (data) => {
-      if (!data || !data.socketId) return;
-      if (data.socketId === socketRef.current?.id) return; // ignore own
+      if (data.socketId === socketRef.current?.id) return;
       setTypingUsers((prev) => {
         const next = { ...prev };
         if (data.typing) {
-          next[data.socketId] = { displayName: data.displayName, ts: data.ts || Date.now() };
+          next[data.socketId] = { displayName: data.displayName };
         } else {
           delete next[data.socketId];
         }
@@ -72,256 +75,296 @@ export default function App() {
       });
     });
 
-    socket.on("users_count", (payload) => {
-      // payload: { total }
-      if (payload && typeof payload.total === "number") {
-        setTotalUsers(payload.total);
-      }
-    });
+    socket.on("users_count", (data) => setTotalUsers(data.total));
 
-    socket.on("connect_error", (err) => console.error("connect_error:", err));
-    socket.on("error", (err) => console.error("socket error:", err));
-
-    return () => {
-      socket.disconnect();
-      console.log("Socket cleaned up");
-    };
+    return () => socket.disconnect();
   }, []);
 
-  // TYPING EMIT LOGIC (debounced)
+  // --- EFFECT: AUTO SCROLL ---
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messageList, typingUsers]);
+
+  // --- HANDLERS ---
   const typingTimeoutRef = useRef(null);
-  const isTypingRef = useRef(false);
 
-  const emitTyping = (typing) => {
-    const socket = socketRef.current;
-    if (!socket || socket.connected === false) return;
-    socket.emit("typing", { typing, displayName: "You" });
-  };
-
-  const startTyping = () => {
-    if (isTypingRef.current) {
-      clearTimeout(typingTimeoutRef.current);
-      typingTimeoutRef.current = setTimeout(() => {
-        isTypingRef.current = false;
-        emitTyping(false);
-      }, 1100);
-      return;
-    }
-
-    isTypingRef.current = true;
-    emitTyping(true);
-
+  const handleTyping = () => {
+    if (!socketRef.current) return;
+    socketRef.current.emit("typing", { typing: true, displayName: "Someone" });
+    
     clearTimeout(typingTimeoutRef.current);
     typingTimeoutRef.current = setTimeout(() => {
-      isTypingRef.current = false;
-      emitTyping(false);
-    }, 1100);
+      socketRef.current.emit("typing", { typing: false });
+    }, 1500);
   };
 
   const sendMessage = () => {
-    const text = message.trim();
-    if (!text) return;
+    if (!message.trim() || !socketRef.current) return;
 
-    const messageData = {
+    const msgData = {
       id: generateId(),
-      message: text,
-      time: formatTime(),
-      socketId: socketRef.current?.id,
+      message: message.trim(),
+      time: new Date().toISOString(),
+      socketId: socketRef.current.id,
+      // Generate a consistent avatar based on socket ID
+      avatar: `https://api.dicebear.com/7.x/notionists/svg?seed=${socketRef.current.id}&backgroundColor=b6e3f4,c0aede,d1d4f9`
     };
 
-    // Optimistic UI
-    setMessageList((prev) => [...prev, messageData]);
+    // Optimistic Update
+    setMessageList((prev) => [...prev, msgData]);
+    socketRef.current.emit("send_message", msgData);
+    socketRef.current.emit("typing", { typing: false });
+    
     setMessage("");
-
-    if (isTypingRef.current) {
-      isTypingRef.current = false;
-      clearTimeout(typingTimeoutRef.current);
-      emitTyping(false);
-    }
-
-    socketRef.current.emit("send_message", messageData, (ack) => {
-      if (!ack?.ok) console.error("Message failed:", ack);
-      else console.log("Delivered:", ack.id);
-    });
   };
 
-  const handleKeyDown = (e) => {
-    if (e.key === "Enter") {
-      sendMessage();
-    } else {
-      startTyping();
-    }
-  };
-
-  // compute typing text & count of other users
-  const typingNames = Object.values(typingUsers)
-    .map((u) => (u.displayName ? u.displayName : "Someone"))
-    .slice(0, 3);
-
-  const typingText = typingNames.length === 0
-    ? ""
-    : typingNames.length === 1
-      ? `${typingNames[0]} typing...`
-      : typingNames.length === 2
-        ? `${typingNames[0]} and ${typingNames[1]} typing...`
-        : `${typingNames[0]}, ${typingNames[1]} and others typing...`;
-
-  // other users count = totalUsers - 1 (exclude self). floor at 0.
-  const otherUsers = Math.max(0, (totalUsers || 1) - 1);
+  // --- RENDER HELPERS ---
+  const otherUsersCount = Math.max(0, totalUsers - 1);
+  const typingArr = Object.values(typingUsers);
 
   return (
-    <div style={{ fontFamily: "Inter, Arial, sans-serif", display: "flex", justifyContent: "center", padding: 20 }}>
-      <style>
-        {`
-          /* hide scrollbar but keep scrollable */
-          .messages {
-            -ms-overflow-style: none; /* IE and Edge */
-            scrollbar-width: none; /* Firefox */
-          }
-          .messages::-webkit-scrollbar {
-            width: 0px;
-            height: 0px;
-          }
+    <div className="app-container">
+      <style>{`
+        :root {
+          --primary: #4f46e5;
+          --primary-light: #e0e7ff;
+          --bg: #f3f4f6;
+          --chat-bg: #ffffff;
+          --mine-bubble: #4f46e5;
+          --other-bubble: #f3f4f6;
+          --text-main: #1f2937;
+          --text-sub: #6b7280;
+        }
 
-          /* responsive */
-          @media (max-width: 640px) {
-            .container {
-              width: calc(100% - 24px) !important;
-              margin: 0 12px;
-            }
-            .header h3 { font-size: 16px; }
-          }
-        `}
-      </style>
+        body { margin: 0; font-family: 'Inter', sans-serif; background: var(--bg); }
 
-      <div
-        className="container"
-        style={{
-          width: 720,
-          maxWidth: "100%",
-          borderRadius: 12,
-          boxShadow: "0 8px 32px rgba(2,6,23,0.12)",
-          overflow: "hidden",
-          display: "flex",
-          flexDirection: "column",
-          background: "#fff",
-        }}
-      >
-        <div
-          className="header"
-          style={{
-            padding: "16px 20px",
-            background: "#0f172a",
-            color: "white",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
-        >
+        .app-container {
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          min-height: 100dvh; /* Dynamic Viewport Height for Mobile */
+          padding: 20px;
+          box-sizing: border-box;
+        }
+
+        .chat-card {
+          width: 100%;
+          max-width: 500px;
+          height: 85vh;
+          background: var(--chat-bg);
+          border-radius: 24px;
+          box-shadow: 0 20px 50px -10px rgba(0,0,0,0.1);
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+          position: relative;
+        }
+
+        /* HEADER */
+        .chat-header {
+          padding: 16px 20px;
+          background: rgba(255,255,255,0.9);
+          backdrop-filter: blur(10px);
+          border-bottom: 1px solid #f0f0f0;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          z-index: 10;
+        }
+        .status-dot {
+          height: 8px; width: 8px; border-radius: 50%;
+          display: inline-block; margin-right: 6px;
+        }
+        .online { background: #22c55e; box-shadow: 0 0 8px #22c55e; }
+        .offline { background: #ef4444; }
+
+        /* MESSAGES AREA */
+        .messages-area {
+          flex: 1;
+          padding: 20px;
+          overflow-y: auto;
+          background-image: radial-gradient(#e5e7eb 1px, transparent 1px);
+          background-size: 20px 20px;
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+
+        .message-group {
+          display: flex;
+          gap: 10px;
+          max-width: 80%;
+          animation: slideIn 0.3s ease;
+        }
+        .message-group.mine {
+          align-self: flex-end;
+          flex-direction: row-reverse;
+        }
+
+        .avatar {
+          width: 32px; height: 32px;
+          border-radius: 50%;
+          background: #ddd;
+          border: 2px solid white;
+          flex-shrink: 0;
+        }
+
+        .bubble {
+          padding: 10px 14px;
+          border-radius: 18px;
+          position: relative;
+          font-size: 14px;
+          line-height: 1.5;
+          box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        }
+        .mine .bubble {
+          background: var(--mine-bubble);
+          color: white;
+          border-bottom-right-radius: 4px;
+        }
+        .other .bubble {
+          background: var(--other-bubble);
+          color: var(--text-main);
+          border-bottom-left-radius: 4px;
+        }
+
+        .meta {
+          font-size: 10px;
+          margin-top: 4px;
+          opacity: 0.7;
+          text-align: right;
+        }
+
+        /* TYPING */
+        .typing-indicator {
+          font-size: 12px;
+          color: var(--text-sub);
+          padding: 0 24px 8px;
+          height: 20px;
+        }
+
+        /* INPUT AREA */
+        .input-area {
+          padding: 16px;
+          background: white;
+          border-top: 1px solid #f3f4f6;
+          display: flex;
+          gap: 10px;
+          align-items: center;
+        }
+        .msg-input {
+          flex: 1;
+          background: #f9fafb;
+          border: 1px solid #e5e7eb;
+          padding: 12px 16px;
+          border-radius: 99px;
+          outline: none;
+          font-size: 14px;
+          transition: all 0.2s;
+        }
+        .msg-input:focus {
+          border-color: var(--primary);
+          box-shadow: 0 0 0 3px var(--primary-light);
+          background: white;
+        }
+        .send-btn {
+          background: var(--primary);
+          color: white;
+          border: none;
+          width: 44px; height: 44px;
+          border-radius: 50%;
+          cursor: pointer;
+          display: flex; align-items: center; justify-content: center;
+          transition: transform 0.1s;
+        }
+        .send-btn:active { transform: scale(0.95); }
+
+        @keyframes slideIn {
+          from { opacity: 0; transform: translateY(10px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* MOBILE OVERRIDES */
+        @media (max-width: 600px) {
+          .app-container { padding: 0; }
+          .chat-card { height: 100dvh; max-width: 100%; border-radius: 0; }
+        }
+      `}</style>
+
+      <div className="chat-card">
+        {/* HEADER */}
+        <div className="chat-header">
           <div>
-            <h3 style={{ margin: 0 }}>TrimGo Live Chat</h3>
-            <span style={{ fontSize: 12, opacity: 0.75 }}>Socket.io test room</span>
-          </div>
-
-          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <div style={{
-                  width: 10,
-                  height: 10,
-                  borderRadius: "50%",
-                  background: connected ? "#22c55e" : "#ef4444"
-                }} />
-                <span style={{ fontSize: 13 }}>{connected ? "Connected" : "Disconnected"}</span>
-              </div>
-              <div style={{ fontSize: 12, opacity: 0.85, marginTop: 6 }}>
-                Users: <strong>{otherUsers}</strong>
-              </div>
+            <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#111' }}>Public Lounge</h2>
+            <div style={{ fontSize: 12, color: '#666', marginTop: 2 }}>
+              <span className={`status-dot ${connected ? 'online' : 'offline'}`} />
+              {connected ? `${otherUsersCount} others online` : 'Connecting...'}
             </div>
           </div>
+          {/* Your Avatar Preview */}
+          {socketRef.current?.id && (
+            <img 
+              src={`https://api.dicebear.com/7.x/notionists/svg?seed=${socketRef.current.id}&backgroundColor=b6e3f4,c0aede,d1d4f9`} 
+              alt="My Avatar" 
+              style={{ width: 36, height: 36, borderRadius: '50%' }}
+            />
+          )}
         </div>
 
-        <div
-          className="messages"
-          style={{
-            padding: 16,
-            background: "#f8fafc",
-            minHeight: 300,
-            maxHeight: 520,
-            overflowY: "auto",
-          }}
-        >
-          {messageList.map((msg) => {
+        {/* MESSAGES */}
+        <div className="messages-area">
+          {messageList.length === 0 && (
+            <div style={{ textAlign: 'center', marginTop: 40, color: '#9ca3af', fontSize: 14 }}>
+              No messages yet. Say Hi! 👋
+            </div>
+          )}
+          
+          {messageList.map((msg, index) => {
             const isMine = msg.socketId === socketRef.current?.id;
-            // ensure long messages wrap & preserve newlines
+            // Generate avatar if missing (for legacy or basic messages)
+            const avatarUrl = msg.avatar || `https://api.dicebear.com/7.x/notionists/svg?seed=${msg.socketId}`;
+            
             return (
-              <div key={msg.id} style={{
-                display: "flex",
-                justifyContent: isMine ? "flex-end" : "flex-start",
-                marginBottom: 12,
-              }}>
-                <div style={{
-                  maxWidth: "78%",
-                  background: isMine ? "#0ea5e9" : "#e6eef8",
-                  color: isMine ? "white" : "#0b3148",
-                  padding: "10px 14px",
-                  borderRadius: 14,
-                  wordBreak: "break-word",
-                  whiteSpace: "pre-wrap", /* preserve line breaks */
-                  boxShadow: "0 1px 0 rgba(2,6,23,0.03)",
-                }}>
-                  <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 6 }}>
-                    {isMine ? "You" : "Someone"}
-                  </div>
-                  <div style={{ fontSize: 15, lineHeight: 1.45 }}>{msg.message}</div>
-                  <div style={{ fontSize: 11, textAlign: "right", opacity: 0.7, marginTop: 8 }}>{msg.time}</div>
+              <div key={index} className={`message-group ${isMine ? 'mine' : 'other'}`}>
+                {!isMine && <img src={avatarUrl} className="avatar" alt="User" />}
+                <div className="bubble">
+                  {msg.message}
+                  <div className="meta">{formatTime(msg.time)}</div>
                 </div>
               </div>
             );
           })}
-
-          {/* TYPING INDICATOR */}
-          {typingText && (
-            <div style={{ marginTop: 6, marginBottom: 6, fontSize: 13, color: "#334155", opacity: 0.95 }}>
-              <em>{typingText}</em>
-            </div>
-          )}
-
           <div ref={messagesEndRef} />
         </div>
 
-        <div style={{ padding: 12, display: "flex", gap: 10, alignItems: "center", background: "white" }}>
+        {/* TYPING INDICATOR */}
+        <div className="typing-indicator">
+          {typingArr.length > 0 && (
+             <span>
+               <span style={{ fontWeight: 600 }}>
+                 {typingArr.length > 2 ? 'Several people' : 'Someone'}
+               </span> is typing...
+             </span>
+          )}
+        </div>
+
+        {/* INPUT */}
+        <div className="input-area">
           <input
+            className="msg-input"
             value={message}
             onChange={(e) => {
               setMessage(e.target.value);
-              startTyping();
+              handleTyping();
             }}
-            onKeyDown={handleKeyDown}
-            placeholder="Message likho..."
-            style={{
-              flex: 1,
-              padding: "12px 14px",
-              border: "1px solid #e6eef8",
-              borderRadius: 10,
-              minHeight: 44,
-              resize: "vertical"
-            }}
-            aria-label="Type your message"
+            onKeyDown={(e) => e.key === "Enter" && sendMessage()}
+            placeholder="Type a message..."
           />
-          <button
-            onClick={sendMessage}
-            style={{
-              padding: "10px 16px",
-              borderRadius: 10,
-              background: "#0ea5e9",
-              border: "none",
-              color: "white",
-              fontWeight: 600,
-              cursor: "pointer",
-            }}
-          >
-            Send
+          <button className="send-btn" onClick={sendMessage}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="22" y1="2" x2="11" y2="13"></line>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+            </svg>
           </button>
         </div>
       </div>
