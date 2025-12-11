@@ -1,4 +1,3 @@
-// backend/server.js
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
@@ -28,6 +27,7 @@ app.get("/", (req, res) => {
 io.on("connection", (socket) => {
   console.log(`[io] User Connected: ${socket.id}`);
 
+  // forward incoming messages to everyone else
   socket.on("send_message", (data, ack) => {
     try {
       if (!data || typeof data !== "object") {
@@ -52,8 +52,29 @@ io.on("connection", (socket) => {
     }
   });
 
+  // TYPING INDICATOR
+  // payload can be { typing: true } or { typing: false }
+  socket.on("typing", (payload) => {
+    try {
+      // sanitize
+      const isTyping = !!(payload && payload.typing);
+      // broadcast to everyone except the origin socket
+      socket.broadcast.emit("user_typing", {
+        socketId: socket.id,
+        typing: isTyping,
+        // optionally you can send a displayName if provided by client
+        displayName: payload && payload.displayName ? String(payload.displayName) : undefined,
+        ts: Date.now(),
+      });
+    } catch (e) {
+      console.error("[io] typing event error:", e);
+    }
+  });
+
   socket.on("disconnect", (reason) => {
     console.log(`[io] Disconnected: ${socket.id}, reason=${reason}`);
+    // notify others that this user stopped typing (cleanup)
+    socket.broadcast.emit("user_typing", { socketId: socket.id, typing: false });
   });
 });
 

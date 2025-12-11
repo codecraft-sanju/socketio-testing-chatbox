@@ -1,4 +1,3 @@
-// frontend/src/App.jsx
 import React, { useEffect, useRef, useState } from "react";
 import { io as ioClient } from "socket.io-client";
 
@@ -16,13 +15,14 @@ export default function App() {
   const [message, setMessage] = useState("");
   const [messageList, setMessageList] = useState([]);
   const [connected, setConnected] = useState(false);
+  const [typingUsers, setTypingUsers] = useState({}); // { socketId: { displayName?, ts } }
   const messagesEndRef = useRef(null);
   const socketRef = useRef(null);
 
   // Scroll to latest
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messageList]);
+  }, [messageList, typingUsers]);
 
   useEffect(() => {
     // FIXED BACKEND URL
@@ -43,6 +43,7 @@ export default function App() {
     socket.on("disconnect", () => {
       console.log("Disconnected");
       setConnected(false);
+      setTypingUsers({}); // clear typing on disconnect
     });
 
     socket.on("receive_message", (data) => {
@@ -55,6 +56,24 @@ export default function App() {
       console.log("Received:", data);
     });
 
+    // HANDLE TYPING EVENTS FROM OTHERS
+    socket.on("user_typing", (data) => {
+      // data: { socketId, typing, displayName?, ts }
+      if (!data || !data.socketId) return;
+      // ignore own typing events if any
+      if (data.socketId === socketRef.current?.id) return;
+
+      setTypingUsers((prev) => {
+        const next = { ...prev };
+        if (data.typing) {
+          next[data.socketId] = { displayName: data.displayName, ts: data.ts || Date.now() };
+        } else {
+          delete next[data.socketId];
+        }
+        return next;
+      });
+    });
+
     socket.on("connect_error", (err) => console.error("connect_error:", err));
     socket.on("error", (err) => console.error("socket error:", err));
 
@@ -63,6 +82,39 @@ export default function App() {
       console.log("Socket cleaned up");
     };
   }, []);
+
+  // TYPING EMIT LOGIC (debounced)
+  const typingTimeoutRef = useRef(null);
+  const isTypingRef = useRef(false);
+
+  const emitTyping = (typing) => {
+    const socket = socketRef.current;
+    if (!socket || socket.connected === false) return;
+    // include displayName if you want to show name on other side
+    socket.emit("typing", { typing, displayName: "Sender" });
+  };
+
+  const startTyping = () => {
+    if (isTypingRef.current) {
+      // reset stop timeout only
+      clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = setTimeout(() => {
+        isTypingRef.current = false;
+        emitTyping(false);
+      }, 1100);
+      return;
+    }
+
+    // emit typing true
+    isTypingRef.current = true;
+    emitTyping(true);
+
+    clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(() => {
+      isTypingRef.current = false;
+      emitTyping(false);
+    }, 1100); // 1.1s of idle -> stop typing
+  };
 
   const sendMessage = () => {
     const text = message.trim();
@@ -79,6 +131,13 @@ export default function App() {
     setMessageList((prev) => [...prev, messageData]);
     setMessage("");
 
+    // if user was typing, emit stop
+    if (isTypingRef.current) {
+      isTypingRef.current = false;
+      clearTimeout(typingTimeoutRef.current);
+      emitTyping(false);
+    }
+
     socketRef.current.emit("send_message", messageData, (ack) => {
       if (!ack?.ok) console.error("Message failed:", ack);
       else console.log("Delivered:", ack.id);
@@ -86,8 +145,26 @@ export default function App() {
   };
 
   const handleKeyDown = (e) => {
-    if (e.key === "Enter") sendMessage();
+    if (e.key === "Enter") {
+      sendMessage();
+    } else {
+      // any other key -> user is typing
+      startTyping();
+    }
   };
+
+  // compute a friendly typing message
+  const typingNames = Object.values(typingUsers)
+    .map((u) => (u.displayName ? u.displayName : "Someone"))
+    .slice(0, 3); // cap to 3 names
+
+  const typingText = typingNames.length === 0
+    ? ""
+    : typingNames.length === 1
+      ? `${typingNames[0]} typing...`
+      : typingNames.length === 2
+        ? `${typingNames[0]} and ${typingNames[1]} typing...`
+        : `${typingNames[0]}, ${typingNames[1]} and others typing...`;
 
   return (
     <div style={{ fontFamily: "Inter, Arial", display: "flex", justifyContent: "center", padding: 30 }}>
@@ -147,13 +224,24 @@ export default function App() {
               </div>
             );
           })}
+
+          {/* TYPING INDICATOR */}
+          {typingText && (
+            <div style={{ marginTop: 6, marginBottom: 6, fontSize: 13, color: "#334155", opacity: 0.9 }}>
+              <em>{typingText}</em>
+            </div>
+          )}
+
           <div ref={messagesEndRef} />
         </div>
 
         <div style={{ padding: 12, display: "flex", gap: 10, background: "white" }}>
           <input
             value={message}
-            onChange={(e) => setMessage(e.target.value)}
+            onChange={(e) => {
+              setMessage(e.target.value);
+              startTyping();
+            }}
             onKeyDown={handleKeyDown}
             placeholder="Message likho..."
             style={{
