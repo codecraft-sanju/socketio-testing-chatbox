@@ -7,7 +7,7 @@ const cors = require("cors");
 const app = express();
 app.use(express.json());
 
-// Adjust origin
+// Adjust origin according to your setup
 const CLIENT_URL = process.env.CLIENT_URL || "https://socketio-testing-chatbox.vercel.app";
 
 app.use(cors({
@@ -45,11 +45,19 @@ io.on("connection", (socket) => {
   console.log(`[+] User Joined: ${socket.id}`);
   connectedSockets.add(socket.id);
 
+  // Default name set kar rahe hain taaki agar identify se pehle disconnect ho to error na aaye
+  socket.data.displayName = `User-${socket.id.slice(0,5)}`;
+
   socket.emit("history", messageHistory);
   broadcastUserCounts();
 
+  // --- 1. HANDLE IDENTIFY (Updated for Notification) ---
   socket.on("identify", (payload) => {
-    socket.data.displayName = payload?.displayName || `User-${socket.id.slice(0,5)}`;
+    const name = payload?.displayName || `User-${socket.id.slice(0,5)}`;
+    socket.data.displayName = name;
+    
+    // 🔥 FIX: Notify others that user joined (Toast dikhane ke liye)
+    socket.broadcast.emit("user_joined", { displayName: name });
   });
 
   // --- REACTION TOGGLE LOGIC ---
@@ -77,7 +85,6 @@ io.on("connection", (socket) => {
         }
 
         // 3. Add new reaction ONLY if it is DIFFERENT from previous
-        // (If previousEmoji === emoji, we just removed it above and we stop there -> Toggle OFF)
         if (previousEmoji !== emoji) {
              if (!msg.reactions[emoji]) msg.reactions[emoji] = [];
              msg.reactions[emoji].push(socket.id);
@@ -137,11 +144,19 @@ io.on("connection", (socket) => {
     });
   });
 
+  // --- 2. HANDLE DISCONNECT (Updated for Notification) ---
   socket.on("disconnect", (reason) => {
     console.log(`[-] User Left: ${socket.id} (${reason})`);
     connectedSockets.delete(socket.id);
+    
+    // Stop typing indicator
     socket.broadcast.emit("user_typing", { socketId: socket.id, typing: false });
+    
+    // Update user count
     broadcastUserCounts();
+
+    // 🔥 FIX: Notify others that user left (Toast dikhane ke liye)
+    socket.broadcast.emit("user_left", { displayName: socket.data.displayName });
   });
 });
 
