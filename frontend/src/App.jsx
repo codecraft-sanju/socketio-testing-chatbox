@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { io as ioClient } from "socket.io-client";
+import { Toaster, toast } from 'react-hot-toast'; // --- 1. IMPORT TOAST ---
 
 // --- CONFIG & UTILS ---
 const FIX_TOKEN = "jhdhhdhdhhsdsdhsdhshdh"; 
@@ -161,12 +162,35 @@ function ChatRoom({ username, onLogout }) {
       console.log("socket connected", socket.id);
       setConnected(true);
       socket.emit("identify", { displayName: clientDisplayName.current });
+      // Self joined toast (Optional, usually not needed)
     });
 
     socket.on("disconnect", (reason) => {
       console.log("socket disconnected", reason);
       setConnected(false);
       setTypingUsers({});
+    });
+
+    // --- 2. JOIN / LEFT NOTIFICATIONS ---
+    socket.on("user_joined", (data) => {
+       const name = data.displayName || "A new user";
+       // Sound nahi bajega, sirf toast aayega
+       toast.success(`${name} joined the chat`, {
+         duration: 3000,
+         position: 'top-center',
+         style: { background: '#fff', color: '#10b981', fontWeight: '600', borderRadius: '20px' },
+         iconTheme: { primary: '#10b981', secondary: '#fff' },
+       });
+    });
+
+    socket.on("user_left", (data) => {
+       const name = data.displayName || "Someone";
+       toast(`${name} left the chat`, {
+         duration: 3000,
+         position: 'top-center',
+         icon: '👋',
+         style: { background: '#fff', color: '#ef4444', fontWeight: '600', borderRadius: '20px' },
+       });
     });
 
     socket.on("history", (history = []) => {
@@ -289,6 +313,10 @@ function ChatRoom({ username, onLogout }) {
   return (
     <div className="app-container">
       <StyleSheet />
+      
+      {/* --- 3. TOASTER COMPONENT --- */}
+      <Toaster />
+
       <div className="chat-card">
         {/* HEADER */}
         <div className="chat-header">
@@ -352,8 +380,7 @@ function ChatRoom({ username, onLogout }) {
           )}
 
           {messageList.map((msg) => {
-            // --- FIX IS HERE: CHECK BOTH SOCKET ID AND USERNAME ---
-            // Ab yeh check karega ki socketId match karta hai YA fir username match karta hai.
+            // Check both socket ID and Username
             const isMine = msg.socketId === socketRef.current?.id || msg.displayName === username;
             
             const seed = msg.displayName || msg.socketId;
@@ -407,7 +434,6 @@ function ChatRoom({ username, onLogout }) {
                                      key={emoji} 
                                      className={`reaction-pill ${iReacted ? "active-reaction" : ""}`}
                                      onClick={(e) => {
-                                         // Clicking an existing pill also toggles it!
                                          e.stopPropagation();
                                          handleReaction(msg.id, emoji);
                                      }}
@@ -462,7 +488,7 @@ function ChatRoom({ username, onLogout }) {
             className="send-btn"
             onClick={sendMessage}
             disabled={!message.trim()}
-            style={{ opacity: message.trim() ? 1 : 0.6 }}
+            style={{ opacity: message.trim() ? 1 : 1 }}
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
           </button>
