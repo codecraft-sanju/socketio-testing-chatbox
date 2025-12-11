@@ -7,7 +7,7 @@ const cors = require("cors");
 const app = express();
 app.use(express.json());
 
-// Adjust origin as needed
+// Adjust origin
 const CLIENT_URL = process.env.CLIENT_URL || "https://socketio-testing-chatbox.vercel.app";
 
 app.use(cors({
@@ -52,58 +52,38 @@ io.on("connection", (socket) => {
     socket.data.displayName = payload?.displayName || `User-${socket.id.slice(0,5)}`;
   });
 
-  // --- REACTION LOGIC (Single Choice per User) ---
+  // --- REACTION TOGGLE LOGIC ---
   socket.on("message_reaction", ({ messageId, emoji }) => {
     const msg = messageHistory.find(m => m.id === messageId);
     if (msg) {
         if (!msg.reactions) msg.reactions = {};
 
-        // 1. Remove this user from ANY existing emoji array for this message
-        // (This ensures one vote per person per message)
+        // 1. Find if user already reacted with something
+        let previousEmoji = null;
         Object.keys(msg.reactions).forEach(key => {
-            const userIndex = msg.reactions[key].indexOf(socket.id);
-            if (userIndex !== -1) {
-                msg.reactions[key].splice(userIndex, 1);
-            }
-            // Clean up empty arrays
-            if (msg.reactions[key].length === 0) {
-                delete msg.reactions[key];
+            if (msg.reactions[key].includes(socket.id)) {
+                previousEmoji = key;
             }
         });
 
-        // 2. Add the new reaction (Toggle logic: If they clicked specific emoji again, we already removed it above. If new emoji, we add it here.)
-        // But wait, the logic above removes *everything*. We need to know if they clicked the *same* one to act as a toggle.
-        
-        // Let's refine:
-        // Did they react with THIS specific emoji just now? We need to check before we cleared it? 
-        // Simpler approach: 
-        // Just add the new one. If they want to "remove" a vote, UI usually handles "click active to remove".
-        // BUT for a "radio button" style (switch vote), we just add to the new one.
-        
-        // Let's implement robust "Radio Button" style (always switches to new one, clicking same one keeps it or toggles? Let's say it adds to new one).
-        
-        // RE-DO LOGIC FOR TOGGLE + SWITCH:
-        // We need to know what they HAD before.
-        let hadReaction = null;
-        Object.keys(msg.reactions).forEach(key => {
-             if (msg.reactions[key].includes(socket.id)) hadReaction = key;
-        });
-
-        // Clear all previous votes
-        if (hadReaction) {
-             const idx = msg.reactions[hadReaction].indexOf(socket.id);
-             msg.reactions[hadReaction].splice(idx, 1);
-             if (msg.reactions[hadReaction].length === 0) delete msg.reactions[hadReaction];
+        // 2. Remove the previous reaction (Always step 1)
+        if (previousEmoji) {
+             const idx = msg.reactions[previousEmoji].indexOf(socket.id);
+             msg.reactions[previousEmoji].splice(idx, 1);
+             // Cleanup empty key
+             if (msg.reactions[previousEmoji].length === 0) {
+                 delete msg.reactions[previousEmoji];
+             }
         }
 
-        // If the new emoji is DIFFERENT from what they had, add it. 
-        // If it's the SAME, we left it removed (Toggle OFF).
-        if (hadReaction !== emoji) {
+        // 3. Add new reaction ONLY if it is DIFFERENT from previous
+        // (If previousEmoji === emoji, we just removed it above and we stop there -> Toggle OFF)
+        if (previousEmoji !== emoji) {
              if (!msg.reactions[emoji]) msg.reactions[emoji] = [];
              msg.reactions[emoji].push(socket.id);
         }
 
-        // Broadcast update
+        // 4. Broadcast
         io.emit("reaction_updated", { id: messageId, reactions: msg.reactions });
     }
   });

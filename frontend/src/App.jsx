@@ -4,7 +4,7 @@ import { io as ioClient } from "socket.io-client";
 // --- CONFIG & UTILS ---
 const FIX_TOKEN = "jhdhhdhdhhsdsdhsdhshdh"; 
 const NOTIFICATION_SOUND = "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3";
-// Requested Emojis
+// Available Emojis
 const REACTION_EMOJIS = ["💗", "😽", "😼", "😻", "😿", "😹"]; 
 
 function generateId() {
@@ -21,7 +21,7 @@ export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [username, setUsername] = useState("");
   const [inputName, setInputName] = useState("");
-  const [shakeError, setShakeError] = useState(false); // For error animation
+  const [shakeError, setShakeError] = useState(false); 
 
   // 1. Check LocalStorage on Load
   useEffect(() => {
@@ -38,7 +38,7 @@ export default function App() {
   const handleLogin = () => {
     if (!inputName.trim()) {
       setShakeError(true);
-      setTimeout(() => setShakeError(false), 500); // Reset shake after 500ms
+      setTimeout(() => setShakeError(false), 500); 
       return;
     }
     
@@ -199,9 +199,8 @@ function ChatRoom({ username, onLogout }) {
       }
     });
 
-    // --- NEW: Reaction Update Listener ---
+    // --- REACTION UPDATED LISTENER ---
     socket.on("reaction_updated", (data) => {
-        // data: { id: messageId, reactions: { '💗': ['socketId1'], ... } }
         setMessageList((prev) => 
             prev.map((msg) => 
                 msg.id === data.id ? { ...msg, reactions: data.reactions } : msg
@@ -258,7 +257,7 @@ function ChatRoom({ username, onLogout }) {
       socketId: socketRef.current.id,
       displayName: clientDisplayName.current,
       avatar: `https://api.dicebear.com/7.x/notionists/svg?seed=${clientDisplayName.current}&backgroundColor=b6e3f4,c0aede,d1d4f9`,
-      reactions: {} // Start empty
+      reactions: {} 
     };
 
     pendingRef.current.set(id, msgData);
@@ -277,11 +276,11 @@ function ChatRoom({ username, onLogout }) {
     setMessage("");
   };
 
-  // --- Handle Clicking an Emoji ---
+  // --- HANDLE REACTION ---
   const handleReaction = (msgId, emoji) => {
       if(!socketRef.current) return;
       socketRef.current.emit("message_reaction", { messageId: msgId, emoji });
-      setActiveReactionId(null); // Close picker
+      setActiveReactionId(null); // Close menu
   };
 
   const otherUsersCount = Math.max(0, totalUsers - 1);
@@ -364,7 +363,7 @@ function ChatRoom({ username, onLogout }) {
                   <div>{msg.message}</div>
                   <div className="meta">{formatTime(msg.time)}</div>
 
-                  {/* --- REACTION TRIGGER (SMILE ICON) --- */}
+                  {/* --- REACTION SMILE BUTTON --- */}
                   <button 
                     className="reaction-btn-trigger"
                     onClick={(e) => {
@@ -386,13 +385,12 @@ function ChatRoom({ username, onLogout }) {
                       </div>
                   )}
 
-                  {/* --- DISPLAY ACTIVE REACTIONS --- */}
+                  {/* --- DISPLAY ACTIVE REACTIONS (PILLS) --- */}
                   {msg.reactions && Object.keys(msg.reactions).length > 0 && (
                       <div className="reactions-row">
                           {Object.entries(msg.reactions).map(([emoji, userIds]) => {
                              if(!userIds || userIds.length === 0) return null;
                              
-                             // Check if I reacted
                              const iReacted = userIds.includes(socketRef.current?.id);
                              
                              return (
@@ -400,6 +398,7 @@ function ChatRoom({ username, onLogout }) {
                                     key={emoji} 
                                     className={`reaction-pill ${iReacted ? "active-reaction" : ""}`}
                                     onClick={(e) => {
+                                        // Clicking an existing pill also toggles it!
                                         e.stopPropagation();
                                         handleReaction(msg.id, emoji);
                                     }}
@@ -537,8 +536,7 @@ const StyleSheet = () => (
     .meta { font-size: 10px; margin-top: 4px; opacity: 0.7; text-align: right; display: block; margin-bottom: -2px; }
     .bubble.pending { opacity:0.8; }
 
-    /* --- REACTION SYSTEM STYLES --- */
-    /* 1. The Smile Button */
+    /* --- REACTION STYLES --- */
     .reaction-btn-trigger {
         position: absolute; top: -10px; right: -5px; width: 26px; height: 26px;
         border-radius: 50%; border: 1px solid #e5e7eb; background: #fff;
@@ -549,7 +547,6 @@ const StyleSheet = () => (
     .reaction-btn-trigger:hover { transform: scale(1.1); }
     .mine .reaction-btn-trigger { right: auto; left: -5px; }
 
-    /* 2. The Popup Picker */
     .reaction-picker-popup {
         position: absolute; top: -50px; right: 0;
         background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(8px);
@@ -568,7 +565,6 @@ const StyleSheet = () => (
     .emoji-item:hover { transform: scale(1.3); background: #f3f4f6; }
     .emoji-item:active { transform: scale(0.9); }
 
-    /* 3. The Reaction Pills (Aggregated) */
     .reactions-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
     
     .reaction-pill {
@@ -580,7 +576,6 @@ const StyleSheet = () => (
     }
     .reaction-pill:hover { background: #f9fafb; border-color: #d1d5db; }
     
-    /* Highlight if I selected this */
     .reaction-pill.active-reaction {
         background: #e0e7ff; border-color: #a5b4fc; color: #4f46e5;
     }
@@ -616,7 +611,7 @@ const StyleSheet = () => (
       .avatar { width: 32px; height: 32px; }
       .bubble { max-width: 85%; font-size: 15px; }
       .chat-header h2 { font-size: 16px; }
-      .reaction-btn-trigger { width: 30px; height: 30px; font-size: 18px; } /* Bigger button for phone */
+      .reaction-btn-trigger { width: 30px; height: 30px; font-size: 18px; } 
     }
   `}</style>
 );
