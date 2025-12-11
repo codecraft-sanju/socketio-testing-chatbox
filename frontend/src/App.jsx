@@ -1,80 +1,96 @@
 // frontend/src/App.jsx
-import { useEffect, useState, useRef } from "react";
-import io from "socket.io-client";
-
-const socket = io("https://socketio-testing-chatbox.onrender.com");
+import React, { useEffect, useRef, useState } from "react";
+import { io as ioClient } from "socket.io-client";
 
 function generateId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-function App() {
+function formatTime(date = new Date()) {
+  const h = date.getHours().toString().padStart(2, "0");
+  const m = date.getMinutes().toString().padStart(2, "0");
+  return `${h}:${m}`;
+}
+
+export default function App() {
   const [message, setMessage] = useState("");
   const [messageList, setMessageList] = useState([]);
   const [connected, setConnected] = useState(false);
   const messagesEndRef = useRef(null);
+  const socketRef = useRef(null);
 
+  // Scroll to latest
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messageList]);
 
   useEffect(() => {
+    // FIXED BACKEND URL
+    const SOCKET_URL = "https://socketio-testing-chatbox.onrender.com";
+
+    const socket = ioClient(SOCKET_URL, {
+      transports: ["websocket"],
+      reconnectionAttempts: 5,
+    });
+
+    socketRef.current = socket;
+
     socket.on("connect", () => {
-      setConnected(true);
       console.log("Connected:", socket.id);
-    });    
+      setConnected(true);
+    });
 
     socket.on("disconnect", () => {
-      setConnected(false);
       console.log("Disconnected");
+      setConnected(false);
     });
 
     socket.on("receive_message", (data) => {
-      // dedupe by id: agar woh id already list me hai toh ignore kar do
       setMessageList((prev) => {
-        const exists = prev.some((m) => m.id && data.id && m.id === data.id);
+        if (!data?.id) data.id = generateId();
+        const exists = prev.some((m) => m.id === data.id);
         if (exists) return prev;
         return [...prev, data];
       });
+      console.log("Received:", data);
     });
 
+    socket.on("connect_error", (err) => console.error("connect_error:", err));
+    socket.on("error", (err) => console.error("socket error:", err));
+
     return () => {
-      socket.off("connect");
-      socket.off("disconnect");
-      socket.off("receive_message");
+      socket.disconnect();
+      console.log("Socket cleaned up");
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const sendMessage = () => {
     const text = message.trim();
     if (!text) return;
 
-    const now = new Date();
-    const time =
-      now.getHours().toString().padStart(2, "0") +
-      ":" +
-      now.getMinutes().toString().padStart(2, "0");
-
     const messageData = {
-      id: generateId(),     // unique id for dedupe
+      id: generateId(),
       message: text,
-      time,
-      socketId: socket.id,
+      time: formatTime(),
+      socketId: socketRef.current?.id,
     };
 
-    // optimistic add (snappy UX) — it's fine because receive_message will be deduped by id
+    // Optimistic UI
     setMessageList((prev) => [...prev, messageData]);
     setMessage("");
-    socket.emit("send_message", messageData);
+
+    socketRef.current.emit("send_message", messageData, (ack) => {
+      if (!ack?.ok) console.error("Message failed:", ack);
+      else console.log("Delivered:", ack.id);
+    });
   };
 
-  const handleKeyPress = (e) => {
+  const handleKeyDown = (e) => {
     if (e.key === "Enter") sendMessage();
   };
 
   return (
-    <div style={{ fontFamily: "Inter, Arial, sans-serif", display: "flex", justifyContent: "center", padding: 30 }}>
+    <div style={{ fontFamily: "Inter, Arial", display: "flex", justifyContent: "center", padding: 30 }}>
       <div style={{
         width: 520,
         borderRadius: 12,
@@ -83,44 +99,50 @@ function App() {
         display: "flex",
         flexDirection: "column",
       }}>
-        <div style={{ padding: "16px 20px", background: "#0f172a", color: "white", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{
+          padding: "16px 20px",
+          background: "#0f172a",
+          color: "white",
+          display: "flex",
+          justifyContent: "space-between",
+        }}>
           <div>
-            <h3 style={{ margin: 0, fontSize: 18 }}>TrimGo Live Chat</h3>
-            <div style={{ fontSize: 12, opacity: 0.85 }}>Socket.io test room</div>
+            <h3 style={{ margin: 0 }}>TrimGo Live Chat</h3>
+            <span style={{ fontSize: 12, opacity: 0.75 }}>Socket.io test room</span>
           </div>
-          <div style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 8 }}>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <div style={{
               width: 10,
               height: 10,
-              borderRadius: 10,
-              background: connected ? "#22c55e" : "#ef4444",
-              boxShadow: connected ? "0 0 8px rgba(34,197,94,0.3)" : "0 0 8px rgba(239,68,68,0.25)"
+              borderRadius: "50%",
+              background: connected ? "#22c55e" : "#ef4444"
             }} />
-            <div style={{ opacity: 0.9 }}>{connected ? "Connected" : "Disconnected"}</div>
+            <span>{connected ? "Connected" : "Disconnected"}</span>
           </div>
         </div>
 
         <div style={{ padding: 16, background: "#f8fafc", minHeight: 400, maxHeight: 400, overflowY: "auto" }}>
-          {messageList.map((msg, idx) => {
-            const isMine = msg.socketId === socket.id;
+          {messageList.map((msg) => {
+            const isMine = msg.socketId === socketRef.current?.id;
             return (
-              <div key={msg.id ?? idx} style={{ display: "flex", marginBottom: 12, justifyContent: isMine ? "flex-end" : "flex-start" }}>
+              <div key={msg.id} style={{
+                display: "flex",
+                justifyContent: isMine ? "flex-end" : "flex-start",
+                marginBottom: 12,
+              }}>
                 <div style={{
                   maxWidth: "78%",
                   background: isMine ? "#0ea5e9" : "#e6eef8",
                   color: isMine ? "white" : "#0b3148",
                   padding: "10px 14px",
                   borderRadius: 14,
-                  borderTopRightRadius: isMine ? 4 : 14,
-                  borderTopLeftRadius: isMine ? 14 : 4,
-                  boxShadow: "0 2px 6px rgba(2,6,23,0.06)",
-                  wordBreak: "break-word",
                 }}>
-                  <div style={{ fontSize: 12, marginBottom: 6, opacity: 0.9, fontWeight: 600 }}>
+                  <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 6 }}>
                     {isMine ? "Sender" : "Receiver"}
                   </div>
-                  <div style={{ fontSize: 14, lineHeight: 1.4 }}>{msg.message}</div>
-                  <div style={{ fontSize: 11, opacity: 0.7, marginTop: 8, textAlign: "right" }}>{msg.time}</div>
+                  <div>{msg.message}</div>
+                  <div style={{ fontSize: 11, textAlign: "right", opacity: 0.7 }}>{msg.time}</div>
                 </div>
               </div>
             );
@@ -128,19 +150,17 @@ function App() {
           <div ref={messagesEndRef} />
         </div>
 
-        <div style={{ padding: 12, display: "flex", gap: 10, alignItems: "center", background: "white" }}>
+        <div style={{ padding: 12, display: "flex", gap: 10, background: "white" }}>
           <input
             value={message}
             onChange={(e) => setMessage(e.target.value)}
-            onKeyPress={handleKeyPress}
+            onKeyDown={handleKeyDown}
             placeholder="Message likho..."
             style={{
               flex: 1,
               padding: "12px 14px",
-              borderRadius: 10,
               border: "1px solid #e6eef8",
-              outline: "none",
-              fontSize: 14
+              borderRadius: 10,
             }}
           />
           <button
@@ -148,11 +168,10 @@ function App() {
             style={{
               padding: "10px 16px",
               borderRadius: 10,
-              border: "none",
               background: "#0ea5e9",
+              border: "none",
               color: "white",
               fontWeight: 600,
-              cursor: "pointer"
             }}
           >
             Send
@@ -162,5 +181,3 @@ function App() {
     </div>
   );
 }
-
-export default App;
