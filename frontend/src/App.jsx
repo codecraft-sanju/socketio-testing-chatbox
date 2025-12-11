@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { io as ioClient } from "socket.io-client";
-import { Toaster, toast } from 'react-hot-toast'; // --- 1. IMPORT TOAST ---
+import { Toaster, toast } from 'react-hot-toast';
 
 // --- CONFIG & UTILS ---
 const FIX_TOKEN = "jhdhhdhdhhsdsdhsdhshdh"; 
@@ -59,7 +59,7 @@ export default function App() {
     setInputName("");
   };
 
-  // --- RENDER LOGIN (ADVANCED UI) ---
+  // --- RENDER LOGIN ---
   if (!isLoggedIn) {
     const previewSeed = inputName.trim() || "guest";
     const avatarUrl = `https://api.dicebear.com/7.x/notionists/svg?seed=${previewSeed}&backgroundColor=b6e3f4,c0aede,d1d4f9`;
@@ -123,11 +123,15 @@ function ChatRoom({ username, onLogout }) {
   
   // Track active reaction picker (Message ID)
   const [activeReactionId, setActiveReactionId] = useState(null);
+  
+  // 👇 REPLY STATE
+  const [replyingTo, setReplyingTo] = useState(null);
 
   // REFS
   const socketRef = useRef(null);
   const messagesEndRef = useRef(null);
   const audioRef = useRef(null);
+  const inputRef = useRef(null); // To focus input after clicking reply
   const pendingRef = useRef(new Map());
   
   const clientDisplayName = useRef(username); 
@@ -162,7 +166,6 @@ function ChatRoom({ username, onLogout }) {
       console.log("socket connected", socket.id);
       setConnected(true);
       socket.emit("identify", { displayName: clientDisplayName.current });
-      // Self joined toast (Optional, usually not needed)
     });
 
     socket.on("disconnect", (reason) => {
@@ -174,7 +177,6 @@ function ChatRoom({ username, onLogout }) {
     // --- 2. JOIN / LEFT NOTIFICATIONS ---
     socket.on("user_joined", (data) => {
        const name = data.displayName || "A new user";
-       // Sound nahi bajega, sirf toast aayega
        toast.success(`${name} joined the chat`, {
          duration: 3000,
          position: 'top-center',
@@ -256,7 +258,7 @@ function ChatRoom({ username, onLogout }) {
   // Auto scroll
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messageList, typingUsers]);
+  }, [messageList, typingUsers, replyingTo]);
 
   // Typing debounce
   const typingTimeoutRef = useRef(null);
@@ -281,7 +283,13 @@ function ChatRoom({ username, onLogout }) {
       socketId: socketRef.current.id,
       displayName: clientDisplayName.current,
       avatar: `https://api.dicebear.com/7.x/notionists/svg?seed=${clientDisplayName.current}&backgroundColor=b6e3f4,c0aede,d1d4f9`,
-      reactions: {} 
+      reactions: {},
+      // 👇 INCLUDE REPLY DATA
+      replyTo: replyingTo ? {
+          id: replyingTo.id,
+          displayName: replyingTo.displayName,
+          message: replyingTo.message
+      } : null
     };
 
     pendingRef.current.set(id, msgData);
@@ -298,6 +306,7 @@ function ChatRoom({ username, onLogout }) {
 
     socketRef.current.emit("typing", { typing: false });
     setMessage("");
+    setReplyingTo(null); // Clear reply state
   };
 
   // --- HANDLE REACTION ---
@@ -305,6 +314,12 @@ function ChatRoom({ username, onLogout }) {
       if(!socketRef.current) return;
       socketRef.current.emit("message_reaction", { messageId: msgId, emoji });
       setActiveReactionId(null); // Close menu
+  };
+
+  // --- INIT REPLY ---
+  const initReply = (msg) => {
+      setReplyingTo(msg);
+      inputRef.current?.focus();
   };
 
   const otherUsersCount = Math.max(0, totalUsers - 1);
@@ -393,22 +408,33 @@ function ChatRoom({ username, onLogout }) {
                 {!isMine && <img src={avatarUrl} className="avatar" alt="User avatar" />}
                 
                 <div className={`bubble ${isPending ? "pending" : ""}`}>
+                  
+                  {/* 👇 REPLY QUOTE BLOCK (Updated UI) */}
+                  {msg.replyTo && (
+                      <div className="reply-quote-in-bubble">
+                          <span className="reply-to-name">{msg.replyTo.displayName}</span>
+                          <div className="reply-to-text">{msg.replyTo.message}</div>
+                      </div>
+                  )}
+
                   <div style={{ fontWeight: 600, marginBottom: 4, fontSize: '0.9em' }}>
                     {isMine ? "You" : (msg.displayName || "Anon")}
                   </div>
                   <div>{msg.message}</div>
                   <div className="meta">{formatTime(msg.time)}</div>
 
-                  {/* --- REACTION SMILE BUTTON --- */}
-                  <button 
-                    className="reaction-btn-trigger"
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        setActiveReactionId(showPicker ? null : msg.id);
-                    }}
-                  >
-                    ☺
-                  </button>
+                  {/* --- ACTION BUTTONS GROUP (Reply + Smile) --- */}
+                  <div className="action-btns-group">
+                      {/* 1. REPLY BUTTON */}
+                      <button className="action-btn" onClick={(e) => { e.stopPropagation(); initReply(msg); }}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 17 4 12 9 7"></polyline><path d="M20 18v-2a4 4 0 0 0-4-4H4"></path></svg>
+                      </button>
+
+                      {/* 2. REACTION BUTTON */}
+                      <button className="action-btn" onClick={(e) => { e.stopPropagation(); setActiveReactionId(showPicker ? null : msg.id); }}>
+                        ☺
+                      </button>
+                  </div>
 
                   {/* --- POPUP EMOJI PICKER --- */}
                   {showPicker && (
@@ -467,31 +493,47 @@ function ChatRoom({ username, onLogout }) {
         </div>
 
         {/* FOOTER */}
-        <div className="input-area">
-          <textarea
-            className="msg-input"
-            value={message}
-            onChange={(e) => {
-              setMessage(e.target.value);
-              handleTyping();
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                sendMessage();
-              }
-            }}
-            placeholder="Type a message..."
-            rows={1}
-          />
-          <button
-            className="send-btn"
-            onClick={sendMessage}
-            disabled={!message.trim()}
-            style={{ opacity: message.trim() ? 1 : 1 }}
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
-          </button>
+        <div style={{background: 'white', borderTop: '1px solid #f3f4f6'}}>
+            {/* 👇 REPLY PREVIEW BAR (Above Input) */}
+            {replyingTo && (
+                <div className="reply-preview-bar">
+                    <div className="reply-info">
+                        <span className="reply-title">Replying to {replyingTo.displayName}</span>
+                        <span className="reply-subtitle">{replyingTo.message}</span>
+                    </div>
+                    <button className="close-reply-btn" onClick={() => setReplyingTo(null)}>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    </button>
+                </div>
+            )}
+
+            <div className="input-area">
+                <textarea
+                    ref={inputRef}
+                    className="msg-input"
+                    value={message}
+                    onChange={(e) => {
+                    setMessage(e.target.value);
+                    handleTyping();
+                    }}
+                    onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        sendMessage();
+                    }
+                    }}
+                    placeholder="Type a message..."
+                    rows={1}
+                />
+                <button
+                    className="send-btn"
+                    onClick={sendMessage}
+                    disabled={!message.trim()}
+                    style={{ opacity: message.trim() ? 1 : 1 }}
+                >
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                </button>
+            </div>
         </div>
       </div>
     </div>
@@ -571,67 +613,78 @@ const StyleSheet = () => (
     .meta { font-size: 10px; margin-top: 4px; opacity: 0.7; text-align: right; display: block; margin-bottom: -2px; }
     .bubble.pending { opacity:0.8; }
 
-    /* --- REACTION STYLES (FIXED POSITIONING) --- */
-    .reaction-btn-trigger {
-        position: absolute; top: -10px; right: -5px; width: 26px; height: 26px;
-        border-radius: 50%; border: 1px solid #e5e7eb; background: #fff;
-        cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.08); color: #555; z-index: 5;
-        transition: transform 0.2s, opacity 0.2s;
+    /* --- ACTION BUTTONS (REPLY & REACT) --- */
+    .action-btns-group {
+        position: absolute; top: -12px; right: -5px; 
+        display: flex; gap: 4px;
+        opacity: 0; transition: opacity 0.2s;
+        z-index: 5;
     }
-    .reaction-btn-trigger:hover { transform: scale(1.1); }
-    .mine .reaction-btn-trigger { right: auto; left: -5px; }
+    /* Mobile me hamesha dikhe ya hover pe */
+    .bubble:hover .action-btns-group { opacity: 1; }
+    @media (max-width: 768px) { .action-btns-group { opacity: 1; top: -14px; } }
 
+    .mine .action-btns-group { right: auto; left: -5px; flex-direction: row-reverse; }
+
+    .action-btn {
+        width: 26px; height: 26px;
+        border-radius: 50%; border: 1px solid #e5e7eb; background: #fff;
+        cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.08); color: #555;
+        transition: transform 0.2s;
+    }
+    .action-btn:hover { transform: scale(1.1); color: var(--primary); border-color: var(--primary-light); }
+
+    /* --- REPLY QUOTE STYLES --- */
+    .reply-quote-in-bubble {
+        margin-bottom: 8px; padding: 8px 10px; border-radius: 8px;
+        background: rgba(0,0,0,0.05); border-left: 4px solid rgba(0,0,0,0.2);
+        font-size: 13px; display: flex; flex-direction: column; gap: 2px;
+        cursor: pointer; user-select: none;
+    }
+    .mine .reply-quote-in-bubble { background: rgba(0,0,0,0.1); border-left-color: rgba(255,255,255,0.5); }
+    .reply-to-name { font-weight: 700; opacity: 0.9; font-size: 11px; }
+    .reply-to-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0.8; max-width: 200px; }
+
+    /* --- REPLY PREVIEW BAR (ABOVE INPUT) --- */
+    .reply-preview-bar {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 8px 16px; background: #f9fafb;
+        border-bottom: 1px solid #e5e7eb;
+        border-left: 4px solid var(--primary);
+        animation: slideUp 0.2s ease-out;
+    }
+    .reply-info { display: flex; flex-direction: column; font-size: 13px; overflow: hidden; }
+    .reply-title { font-weight: 700; color: var(--primary); margin-bottom: 2px; }
+    .reply-subtitle { color: #6b7280; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 80vw; }
+    .close-reply-btn { background: none; border: none; cursor: pointer; color: #9ca3af; padding: 4px; display: flex; align-items: center; }
+    .close-reply-btn:hover { color: #ef4444; background: #fee2e2; border-radius: 50%; }
+    
+    @keyframes slideUp { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+    /* --- REACTION PICKER --- */
     .reaction-picker-popup {
         position: absolute; top: -55px; 
-        
-        /* DEFAULT (Others): Left aligned */
         left: 0; right: auto;
-        
         background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(8px);
         border: 1px solid #e5e7eb; padding: 6px 10px;
         border-radius: 30px;
         box-shadow: 0 8px 20px rgba(0,0,0,0.15);
-        display: grid; 
-        grid-template-columns: repeat(6, 1fr);
-        gap: 5px; 
-        z-index: 50;
-        animation: popIn 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px; 
+        z-index: 50; animation: popIn 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
     }
-
-    /* MINE (Right Side): Right aligned so it grows inwards */
-    .mine .reaction-picker-popup {
-        left: auto; right: 0;
-    }
+    .mine .reaction-picker-popup { left: auto; right: 0; }
     
-    .emoji-item {
-        cursor: pointer; font-size: 20px; transition: transform 0.2s;
-        padding: 4px; border-radius: 50%;
-        display: flex; justify-content: center; align-items: center;
-    }
+    .emoji-item { cursor: pointer; font-size: 20px; transition: transform 0.2s; padding: 4px; border-radius: 50%; display: flex; justify-content: center; align-items: center; }
     .emoji-item:hover { transform: scale(1.3); background: #f3f4f6; }
     .emoji-item:active { transform: scale(0.9); }
 
     .reactions-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-    
-    .reaction-pill {
-        background: #fff; border: 1px solid #e5e7eb; border-radius: 12px;
-        padding: 2px 8px; font-size: 13px; cursor: pointer;
-        display: flex; align-items: center; gap: 4px;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-        transition: all 0.2s;
-    }
+    .reaction-pill { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 2px 8px; font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 4px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); transition: all 0.2s; }
     .reaction-pill:hover { background: #f9fafb; border-color: #d1d5db; }
-    
-    .reaction-pill.active-reaction {
-        background: #e0e7ff; border-color: #a5b4fc; color: #4f46e5;
-    }
-    .mine .reaction-pill {
-        background: rgba(255,255,255,0.2); border-color: rgba(255,255,255,0.3); color: white;
-    }
-    .mine .reaction-pill.active-reaction {
-        background: white; color: var(--primary); border-color: white; font-weight: 600;
-    }
+    .reaction-pill.active-reaction { background: #e0e7ff; border-color: #a5b4fc; color: #4f46e5; }
+    .mine .reaction-pill { background: rgba(255,255,255,0.2); border-color: rgba(255,255,255,0.3); color: white; }
+    .mine .reaction-pill.active-reaction { background: white; color: var(--primary); border-color: white; font-weight: 600; }
     .count { font-size: 0.9em; opacity: 0.8; font-weight: 600; }
 
     @keyframes popIn { from { opacity: 0; transform: scale(0.5) translateY(10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
@@ -642,7 +695,7 @@ const StyleSheet = () => (
     .typing-dots span:nth-child(1) { animation-delay: -0.32s; }
     .typing-dots span:nth-child(2) { animation-delay: -0.16s; }
     
-    .input-area { padding:12px 16px; background:white; border-top:1px solid #f3f4f6; display:flex; gap:10px; align-items:flex-end; }
+    .input-area { padding:12px 16px; background:white; display:flex; gap:10px; align-items:flex-end; }
     .msg-input { flex:1; background:#f9fafb; border:1px solid #e5e7eb; padding:12px 16px; border-radius:24px; outline:none; font-size:15px; transition:all .2s; min-height:24px; max-height:120px; overflow-y:auto; resize:none; line-height: 1.4; font-family: inherit; }
     .msg-input:focus { border-color:var(--primary); box-shadow:0 0 0 3px var(--primary-light); background:white; }
     
@@ -658,14 +711,9 @@ const StyleSheet = () => (
       .avatar { width: 32px; height: 32px; }
       .bubble { max-width: 85%; font-size: 15px; }
       .chat-header h2 { font-size: 16px; }
-      .reaction-btn-trigger { width: 30px; height: 30px; font-size: 18px; }
-      
-      /* --- MOBILE FIX FOR POPUP --- */
-      .reaction-picker-popup {
-          grid-template-columns: repeat(3, 1fr); /* 3 Columns on mobile */
-          width: 140px; /* FIXED WIDTH to ensure no overflow */
-          top: -90px;
-      }
+      .action-btn { width: 30px; height: 30px; font-size: 16px; } /* Bigger touch target on mobile */
+      .reaction-picker-popup { grid-template-columns: repeat(3, 1fr); width: 140px; top: -90px; }
+      .reply-subtitle { max-width: 250px; }
     }
 
     /* --- NEW USER BADGE STYLE --- */

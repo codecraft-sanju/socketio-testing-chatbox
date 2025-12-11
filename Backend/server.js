@@ -51,12 +51,12 @@ io.on("connection", (socket) => {
   socket.emit("history", messageHistory);
   broadcastUserCounts();
 
-  // --- 1. HANDLE IDENTIFY (Updated for Notification) ---
+  // --- 1. HANDLE IDENTIFY ---
   socket.on("identify", (payload) => {
     const name = payload?.displayName || `User-${socket.id.slice(0,5)}`;
     socket.data.displayName = name;
     
-    // 🔥 FIX: Notify others that user joined (Toast dikhane ke liye)
+    // Notify others that user joined
     socket.broadcast.emit("user_joined", { displayName: name });
   });
 
@@ -116,7 +116,9 @@ io.on("connection", (socket) => {
         socketId: data.socketId || socket.id,
         displayName: data.displayName || socket.data.displayName || `User-${socket.id.slice(0,5)}`,
         avatar: data.avatar || null,
-        reactions: {} 
+        reactions: {},
+        // 👇 NEW: Save Reply Data if exists
+        replyTo: data.replyTo || null 
       };
 
       messageHistory.push(msg);
@@ -144,7 +146,7 @@ io.on("connection", (socket) => {
     });
   });
 
-  // --- 2. HANDLE DISCONNECT (Updated for Notification) ---
+  // --- 2. HANDLE DISCONNECT ---
   socket.on("disconnect", (reason) => {
     console.log(`[-] User Left: ${socket.id} (${reason})`);
     connectedSockets.delete(socket.id);
@@ -155,7 +157,7 @@ io.on("connection", (socket) => {
     // Update user count
     broadcastUserCounts();
 
-    // 🔥 FIX: Notify others that user left (Toast dikhane ke liye)
+    // Notify others that user left
     socket.broadcast.emit("user_left", { displayName: socket.data.displayName });
   });
 });
