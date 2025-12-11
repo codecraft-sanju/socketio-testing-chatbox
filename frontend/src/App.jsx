@@ -301,7 +301,7 @@ function ChatRoom({ username, onLogout }) {
           </div>
 
           <div className="header-controls">
-             {/* --- STYLISH NAME BADGE UPDATED HERE --- */}
+             {/* --- STYLISH NAME BADGE --- */}
              <div className="current-user-badge">
                 <svg className="badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
@@ -352,7 +352,10 @@ function ChatRoom({ username, onLogout }) {
           )}
 
           {messageList.map((msg) => {
-            const isMine = msg.socketId === socketRef.current?.id;
+            // --- FIX IS HERE: CHECK BOTH SOCKET ID AND USERNAME ---
+            // Ab yeh check karega ki socketId match karta hai YA fir username match karta hai.
+            const isMine = msg.socketId === socketRef.current?.id || msg.displayName === username;
+            
             const seed = msg.displayName || msg.socketId;
             const avatarUrl = msg.avatar || `https://api.dicebear.com/7.x/notionists/svg?seed=${seed}&backgroundColor=b6e3f4,c0aede,d1d4f9`;
             const isPending = pendingRef.current.has(msg.id);
@@ -377,7 +380,7 @@ function ChatRoom({ username, onLogout }) {
                         setActiveReactionId(showPicker ? null : msg.id);
                     }}
                   >
-                   ☺
+                    ☺
                   </button>
 
                   {/* --- POPUP EMOJI PICKER --- */}
@@ -409,8 +412,8 @@ function ChatRoom({ username, onLogout }) {
                                          handleReaction(msg.id, emoji);
                                      }}
                                    >
-                                      {emoji} <span className="count">{userIds.length}</span>
-                                   </div>
+                                     {emoji} <span className="count">{userIds.length}</span>
+                                  </div>
                              )
                           })}
                       </div>
