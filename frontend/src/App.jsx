@@ -37,7 +37,7 @@ export default function App() {
 
   // --- SOCKET CONNECTION ---
   useEffect(() => {
-    const SOCKET_URL = "https://socketio-testing-chatbox.onrender.com"; // change if needed
+    const SOCKET_URL = "https://socketio-testing-chatbox.onrender.com"; 
 
     const socket = ioClient(SOCKET_URL, {
       transports: ["websocket"],
@@ -213,7 +213,11 @@ export default function App() {
         .offline { background:#ef4444; }
         .messages-area { flex:1; padding:20px; overflow-y:auto; background-image: radial-gradient(#e5e7eb 1px, transparent 1px); background-size:20px 20px; display:flex; flex-direction:column; gap:12px; }
         .message-group { display:flex; gap:10px; max-width:100%; animation:slideIn .2s ease; }
-        .message-group.mine { align-self:flex-end; flex-direction:row-reverse; }
+        .message-group.mine {
+  align-self: flex-end;
+  flex-direction: row-reverse;
+  max-width: 100%; /* prevent squeezing */
+}
         .avatar { width:36px; height:36px; border-radius:50%; background:#ddd; border:2px solid white; flex-shrink:0; }
 
         /* BUBBLE: flexible wrapping + avoid single-letter vertical stacking */
@@ -224,7 +228,16 @@ export default function App() {
           hyphens: auto; /* allow hyphenation where supported */
           max-width: calc(100% - 120px); /* keep room for avatar + padding */
         }
-        .mine .bubble { background:var(--mine-bubble); color:white; border-bottom-right-radius:4px; }
+        .mine .bubble {
+  background: var(--mine-bubble);
+  color: white;
+  border-bottom-right-radius: 4px;
+  max-width: 75%; /* updated width */
+  width: fit-content; /* prevent vertical collapsing */
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
         .other .bubble { background:var(--other-bubble); color:var(--text-main); border-bottom-left-radius:4px; }
         .meta { font-size:10px; margin-top:6px; opacity:0.8; text-align:right; }
 
