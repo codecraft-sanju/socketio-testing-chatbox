@@ -4,7 +4,8 @@ import { io as ioClient } from "socket.io-client";
 // --- CONFIG & UTILS ---
 const FIX_TOKEN = "jhdhhdhdhhsdsdhsdhshdh"; 
 const NOTIFICATION_SOUND = "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3";
-const REACTION_EMOJIS = ["💗", "😽", "😼", "😻", "😿", "😹"]; // Requested Emojis
+// Requested Emojis
+const REACTION_EMOJIS = ["💗", "😽", "😼", "😻", "😿", "😹"]; 
 
 function generateId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -20,7 +21,7 @@ export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [username, setUsername] = useState("");
   const [inputName, setInputName] = useState("");
-  const [shakeError, setShakeError] = useState(false); 
+  const [shakeError, setShakeError] = useState(false); // For error animation
 
   // 1. Check LocalStorage on Load
   useEffect(() => {
@@ -37,7 +38,7 @@ export default function App() {
   const handleLogin = () => {
     if (!inputName.trim()) {
       setShakeError(true);
-      setTimeout(() => setShakeError(false), 500); 
+      setTimeout(() => setShakeError(false), 500); // Reset shake after 500ms
       return;
     }
     
@@ -65,6 +66,8 @@ export default function App() {
     return (
       <div className="login-wrapper">
         <StyleSheet /> 
+        
+        {/* Animated Background Shapes */}
         <div className="shape shape-1"></div>
         <div className="shape shape-2"></div>
 
@@ -117,7 +120,7 @@ function ChatRoom({ username, onLogout }) {
   const [showLogout, setShowLogout] = useState(false);
   const [isMuted, setIsMuted] = useState(() => localStorage.getItem("chat_muted") === "true");
   
-  // Track which message has the emoji picker open
+  // Track active reaction picker (Message ID)
   const [activeReactionId, setActiveReactionId] = useState(null);
 
   // REFS
@@ -196,9 +199,9 @@ function ChatRoom({ username, onLogout }) {
       }
     });
 
-    // --- NEW: Handle Reaction Updates ---
+    // --- NEW: Reaction Update Listener ---
     socket.on("reaction_updated", (data) => {
-        // data = { id: messageId, reactions: { '💗': ['socketid1'], ... } }
+        // data: { id: messageId, reactions: { '💗': ['socketId1'], ... } }
         setMessageList((prev) => 
             prev.map((msg) => 
                 msg.id === data.id ? { ...msg, reactions: data.reactions } : msg
@@ -255,7 +258,7 @@ function ChatRoom({ username, onLogout }) {
       socketId: socketRef.current.id,
       displayName: clientDisplayName.current,
       avatar: `https://api.dicebear.com/7.x/notionists/svg?seed=${clientDisplayName.current}&backgroundColor=b6e3f4,c0aede,d1d4f9`,
-      reactions: {} // Init empty reactions
+      reactions: {} // Start empty
     };
 
     pendingRef.current.set(id, msgData);
@@ -274,11 +277,11 @@ function ChatRoom({ username, onLogout }) {
     setMessage("");
   };
 
-  // --- NEW: Function to send reaction ---
+  // --- Handle Clicking an Emoji ---
   const handleReaction = (msgId, emoji) => {
-    if (!socketRef.current) return;
-    socketRef.current.emit("message_reaction", { messageId: msgId, emoji });
-    setActiveReactionId(null); // Close picker after selection
+      if(!socketRef.current) return;
+      socketRef.current.emit("message_reaction", { messageId: msgId, emoji });
+      setActiveReactionId(null); // Close picker
   };
 
   const otherUsersCount = Math.max(0, totalUsers - 1);
@@ -348,7 +351,7 @@ function ChatRoom({ username, onLogout }) {
             const seed = msg.displayName || msg.socketId;
             const avatarUrl = msg.avatar || `https://api.dicebear.com/7.x/notionists/svg?seed=${seed}&backgroundColor=b6e3f4,c0aede,d1d4f9`;
             const isPending = pendingRef.current.has(msg.id);
-            const showReactions = activeReactionId === msg.id;
+            const showPicker = activeReactionId === msg.id;
 
             return (
               <div key={msg.id} className={`message-group ${isMine ? "mine" : "other"}`}>
@@ -361,42 +364,52 @@ function ChatRoom({ username, onLogout }) {
                   <div>{msg.message}</div>
                   <div className="meta">{formatTime(msg.time)}</div>
 
-                  {/* --- REACTION BUTTON --- */}
+                  {/* --- REACTION TRIGGER (SMILE ICON) --- */}
                   <button 
-                    className="reaction-trigger-btn"
+                    className="reaction-btn-trigger"
                     onClick={(e) => {
                         e.stopPropagation();
-                        setActiveReactionId(showReactions ? null : msg.id);
+                        setActiveReactionId(showPicker ? null : msg.id);
                     }}
                   >
-                    ☺
+                   ☺
                   </button>
 
-                  {/* --- REACTION PICKER POPUP --- */}
-                  {showReactions && (
-                      <div className="reaction-picker" onClick={(e) => e.stopPropagation()}>
+                  {/* --- POPUP EMOJI PICKER --- */}
+                  {showPicker && (
+                      <div className="reaction-picker-popup" onClick={(e) => e.stopPropagation()}>
                           {REACTION_EMOJIS.map(emoji => (
-                              <span key={emoji} onClick={() => handleReaction(msg.id, emoji)}>
+                              <div key={emoji} className="emoji-item" onClick={() => handleReaction(msg.id, emoji)}>
                                   {emoji}
-                              </span>
+                              </div>
                           ))}
                       </div>
                   )}
 
-                  {/* --- DISPLAY EXISTING REACTIONS --- */}
+                  {/* --- DISPLAY ACTIVE REACTIONS --- */}
                   {msg.reactions && Object.keys(msg.reactions).length > 0 && (
-                      <div className="reactions-container">
-                          {Object.entries(msg.reactions).map(([emoji, users]) => {
-                             if(!users || users.length === 0) return null;
+                      <div className="reactions-row">
+                          {Object.entries(msg.reactions).map(([emoji, userIds]) => {
+                             if(!userIds || userIds.length === 0) return null;
+                             
+                             // Check if I reacted
+                             const iReacted = userIds.includes(socketRef.current?.id);
+                             
                              return (
-                                 <div key={emoji} className="reaction-pill" onClick={() => handleReaction(msg.id, emoji)}>
-                                    {emoji} <span style={{fontSize:'0.85em', marginLeft:2}}>{users.length}</span>
+                                 <div 
+                                    key={emoji} 
+                                    className={`reaction-pill ${iReacted ? "active-reaction" : ""}`}
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleReaction(msg.id, emoji);
+                                    }}
+                                 >
+                                    {emoji} <span className="count">{userIds.length}</span>
                                  </div>
                              )
                           })}
                       </div>
                   )}
-
                 </div>
               </div>
             );
@@ -524,21 +537,61 @@ const StyleSheet = () => (
     .meta { font-size: 10px; margin-top: 4px; opacity: 0.7; text-align: right; display: block; margin-bottom: -2px; }
     .bubble.pending { opacity:0.8; }
 
-    /* --- REACTION STYLES --- */
-    .reaction-trigger-btn { position: absolute; top: -10px; right: -5px; width: 24px; height: 24px; border-radius: 50%; border: 1px solid #e5e7eb; background: #fff; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 5px rgba(0,0,0,0.05); opacity: 0; transition: opacity 0.2s; color: #555; }
-    .bubble:hover .reaction-trigger-btn { opacity: 1; }
-    .mine .reaction-trigger-btn { right: auto; left: -5px; }
+    /* --- REACTION SYSTEM STYLES --- */
+    /* 1. The Smile Button */
+    .reaction-btn-trigger {
+        position: absolute; top: -10px; right: -5px; width: 26px; height: 26px;
+        border-radius: 50%; border: 1px solid #e5e7eb; background: #fff;
+        cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.08); color: #555; z-index: 5;
+        transition: transform 0.2s, opacity 0.2s;
+    }
+    .reaction-btn-trigger:hover { transform: scale(1.1); }
+    .mine .reaction-btn-trigger { right: auto; left: -5px; }
 
-    .reaction-picker { position: absolute; top: -45px; right: 0; background: #fff; border: 1px solid #e5e7eb; padding: 6px; border-radius: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); display: flex; gap: 5px; z-index: 50; animation: popIn 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
-    .mine .reaction-picker { right: auto; left: 0; }
-    .reaction-picker span { cursor: pointer; font-size: 18px; padding: 4px; border-radius: 50%; transition: background 0.2s; user-select: none; }
-    .reaction-picker span:hover { background: #f3f4f6; transform: scale(1.2); }
-
-    .reactions-container { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
-    .reaction-pill { background: rgba(255,255,255,0.4); border: 1px solid rgba(0,0,0,0.05); border-radius: 10px; padding: 2px 6px; font-size: 12px; cursor: pointer; display: flex; align-items: center; user-select: none; }
-    .mine .reaction-pill { background: rgba(0,0,0,0.1); border-color: rgba(255,255,255,0.2); }
-    .other .reaction-pill { background: #fff; border-color: #e5e7eb; }
+    /* 2. The Popup Picker */
+    .reaction-picker-popup {
+        position: absolute; top: -50px; right: 0;
+        background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(8px);
+        border: 1px solid #e5e7eb; padding: 6px 10px;
+        border-radius: 30px;
+        box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+        display: flex; gap: 8px; z-index: 50;
+        animation: popIn 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+    .mine .reaction-picker-popup { right: auto; left: 0; }
     
+    .emoji-item {
+        cursor: pointer; font-size: 20px; transition: transform 0.2s;
+        padding: 4px; border-radius: 50%;
+    }
+    .emoji-item:hover { transform: scale(1.3); background: #f3f4f6; }
+    .emoji-item:active { transform: scale(0.9); }
+
+    /* 3. The Reaction Pills (Aggregated) */
+    .reactions-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    
+    .reaction-pill {
+        background: #fff; border: 1px solid #e5e7eb; border-radius: 12px;
+        padding: 2px 8px; font-size: 13px; cursor: pointer;
+        display: flex; align-items: center; gap: 4px;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        transition: all 0.2s;
+    }
+    .reaction-pill:hover { background: #f9fafb; border-color: #d1d5db; }
+    
+    /* Highlight if I selected this */
+    .reaction-pill.active-reaction {
+        background: #e0e7ff; border-color: #a5b4fc; color: #4f46e5;
+    }
+    .mine .reaction-pill {
+        background: rgba(255,255,255,0.2); border-color: rgba(255,255,255,0.3); color: white;
+    }
+    .mine .reaction-pill.active-reaction {
+        background: white; color: var(--primary); border-color: white; font-weight: 600;
+    }
+    .count { font-size: 0.9em; opacity: 0.8; font-weight: 600; }
+
     @keyframes popIn { from { opacity: 0; transform: scale(0.5) translateY(10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
 
     .typing-indicator-inline { display: flex; align-items: center; gap: 8px; margin-left: 10px; margin-bottom: 5px; font-size: 12px; color: var(--text-sub); animation: slideIn .2s ease; }
@@ -563,6 +616,7 @@ const StyleSheet = () => (
       .avatar { width: 32px; height: 32px; }
       .bubble { max-width: 85%; font-size: 15px; }
       .chat-header h2 { font-size: 16px; }
+      .reaction-btn-trigger { width: 30px; height: 30px; font-size: 18px; } /* Bigger button for phone */
     }
   `}</style>
 );

@@ -7,13 +7,14 @@ const cors = require("cors");
 const app = express();
 app.use(express.json());
 
+// Adjust origin as needed
 const CLIENT_URL = process.env.CLIENT_URL || "https://socketio-testing-chatbox.vercel.app";
 
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
     if (origin === CLIENT_URL || process.env.ALLOW_ALL_ORIGINS === "true") return callback(null, true);
-    return callback(null, true); 
+    return callback(null, true);
   },
   methods: ["GET", "POST"],
 }));
@@ -51,37 +52,61 @@ io.on("connection", (socket) => {
     socket.data.displayName = payload?.displayName || `User-${socket.id.slice(0,5)}`;
   });
 
-  // --- HANDLE REACTION ---
+  // --- REACTION LOGIC (Single Choice per User) ---
   socket.on("message_reaction", ({ messageId, emoji }) => {
-    // Find the message
     const msg = messageHistory.find(m => m.id === messageId);
     if (msg) {
-        // Init reactions object if missing
         if (!msg.reactions) msg.reactions = {};
-        
-        // Init array for specific emoji if missing
-        if (!msg.reactions[emoji]) msg.reactions[emoji] = [];
-        
-        const users = msg.reactions[emoji];
-        const userIndex = users.indexOf(socket.id);
 
-        // Toggle logic: If user already reacted, remove it. Else add it.
-        if (userIndex === -1) {
-            users.push(socket.id);
-        } else {
-            users.splice(userIndex, 1);
+        // 1. Remove this user from ANY existing emoji array for this message
+        // (This ensures one vote per person per message)
+        Object.keys(msg.reactions).forEach(key => {
+            const userIndex = msg.reactions[key].indexOf(socket.id);
+            if (userIndex !== -1) {
+                msg.reactions[key].splice(userIndex, 1);
+            }
+            // Clean up empty arrays
+            if (msg.reactions[key].length === 0) {
+                delete msg.reactions[key];
+            }
+        });
+
+        // 2. Add the new reaction (Toggle logic: If they clicked specific emoji again, we already removed it above. If new emoji, we add it here.)
+        // But wait, the logic above removes *everything*. We need to know if they clicked the *same* one to act as a toggle.
+        
+        // Let's refine:
+        // Did they react with THIS specific emoji just now? We need to check before we cleared it? 
+        // Simpler approach: 
+        // Just add the new one. If they want to "remove" a vote, UI usually handles "click active to remove".
+        // BUT for a "radio button" style (switch vote), we just add to the new one.
+        
+        // Let's implement robust "Radio Button" style (always switches to new one, clicking same one keeps it or toggles? Let's say it adds to new one).
+        
+        // RE-DO LOGIC FOR TOGGLE + SWITCH:
+        // We need to know what they HAD before.
+        let hadReaction = null;
+        Object.keys(msg.reactions).forEach(key => {
+             if (msg.reactions[key].includes(socket.id)) hadReaction = key;
+        });
+
+        // Clear all previous votes
+        if (hadReaction) {
+             const idx = msg.reactions[hadReaction].indexOf(socket.id);
+             msg.reactions[hadReaction].splice(idx, 1);
+             if (msg.reactions[hadReaction].length === 0) delete msg.reactions[hadReaction];
         }
 
-        // Cleanup empty emoji keys to keep it clean
-        if (users.length === 0) {
-            delete msg.reactions[emoji];
+        // If the new emoji is DIFFERENT from what they had, add it. 
+        // If it's the SAME, we left it removed (Toggle OFF).
+        if (hadReaction !== emoji) {
+             if (!msg.reactions[emoji]) msg.reactions[emoji] = [];
+             msg.reactions[emoji].push(socket.id);
         }
 
-        // Broadcast updated reactions for this message to everyone
+        // Broadcast update
         io.emit("reaction_updated", { id: messageId, reactions: msg.reactions });
     }
   });
-  // -----------------------
 
   socket.on("send_message", (data, ack) => {
     try {
@@ -104,7 +129,7 @@ io.on("connection", (socket) => {
         socketId: data.socketId || socket.id,
         displayName: data.displayName || socket.data.displayName || `User-${socket.id.slice(0,5)}`,
         avatar: data.avatar || null,
-        reactions: {} // New messages start with empty reactions
+        reactions: {} 
       };
 
       messageHistory.push(msg);
@@ -116,7 +141,6 @@ io.on("connection", (socket) => {
       }
 
       io.emit("receive_message", msg);
-
       if (ack) ack({ ok: true, id: msg.id });
     } catch (e) {
       console.error("send_message error:", e);
