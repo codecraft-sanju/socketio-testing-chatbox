@@ -301,9 +301,15 @@ function ChatRoom({ username, onLogout }) {
           </div>
 
           <div className="header-controls">
-             <div style={{fontSize: 12, marginRight: 10, fontWeight: 600, color: '#4f46e5'}}>
+             {/* --- STYLISH NAME BADGE UPDATED HERE --- */}
+             <div className="current-user-badge">
+                <svg className="badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                  <circle cx="12" cy="7" r="4"></circle>
+                </svg>
                 {username}
              </div>
+
             <button className="icon-btn" onClick={toggleMute}>
               {isMuted ? (
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 5L6 9H2v6h4l5 4V5z"></path><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>
@@ -394,17 +400,17 @@ function ChatRoom({ username, onLogout }) {
                              const iReacted = userIds.includes(socketRef.current?.id);
                              
                              return (
-                                 <div 
-                                    key={emoji} 
-                                    className={`reaction-pill ${iReacted ? "active-reaction" : ""}`}
-                                    onClick={(e) => {
-                                        // Clicking an existing pill also toggles it!
-                                        e.stopPropagation();
-                                        handleReaction(msg.id, emoji);
-                                    }}
-                                 >
-                                    {emoji} <span className="count">{userIds.length}</span>
-                                 </div>
+                                  <div 
+                                     key={emoji} 
+                                     className={`reaction-pill ${iReacted ? "active-reaction" : ""}`}
+                                     onClick={(e) => {
+                                         // Clicking an existing pill also toggles it!
+                                         e.stopPropagation();
+                                         handleReaction(msg.id, emoji);
+                                     }}
+                                   >
+                                      {emoji} <span className="count">{userIds.length}</span>
+                                   </div>
                              )
                           })}
                       </div>
@@ -630,6 +636,47 @@ const StyleSheet = () => (
           grid-template-columns: repeat(3, 1fr); /* 3 Columns on mobile */
           width: 140px; /* FIXED WIDTH to ensure no overflow */
           top: -90px;
+      }
+    }
+
+    /* --- NEW USER BADGE STYLE --- */
+    .current-user-badge {
+      background: linear-gradient(135deg, #e0e7ff 0%, #f3e8ff 100%);
+      color: #4f46e5;
+      padding: 6px 12px;
+      border-radius: 30px;
+      font-size: 13px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-right: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.8);
+      box-shadow: 0 2px 6px rgba(79, 70, 229, 0.1);
+      transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
+      cursor: default;
+      user-select: none;
+    }
+
+    .current-user-badge:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(79, 70, 229, 0.2);
+      background: white;
+      border-color: #4f46e5;
+    }
+
+    .badge-icon {
+      width: 14px;
+      height: 14px;
+      opacity: 0.8;
+    }
+
+    /* Mobile responsive tweak for badge */
+    @media (max-width: 600px) {
+      .current-user-badge {
+        padding: 4px 10px;
+        font-size: 12px;
+        margin-right: 8px;
       }
     }
   `}</style>
