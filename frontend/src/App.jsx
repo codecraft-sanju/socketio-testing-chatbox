@@ -193,6 +193,14 @@ function ChatRoom({ username, onLogout }) {
 
   const toggleMute = () => setIsMuted((prev) => !prev);
 
+  // --- HELPER: Check if user is scrolled near bottom ---
+  const isUserNearBottom = () => {
+    const container = messagesContainerRef.current;
+    if (!container) return false;
+    // If the distance from bottom is less than 150px, consider it "bottom"
+    return container.scrollHeight - container.scrollTop - container.clientHeight < 150;
+  };
+
   // --- SOCKET CONNECTION ---
   useEffect(() => {
     // IMPORTANT: Make sure this matches your deployed backend or localhost
@@ -255,7 +263,7 @@ function ChatRoom({ username, onLogout }) {
       setLoadingHistory(false);
     });
 
-    // --- NEW: HANDLE OLDER MESSAGES (Load More) ---
+    // --- HANDLE OLDER MESSAGES (Load More) ---
     socket.on("more_messages_loaded", (olderMessages) => {
         if (!olderMessages || olderMessages.length === 0) {
             setHasMoreMessages(false);
@@ -294,8 +302,13 @@ function ChatRoom({ username, onLogout }) {
         }
       }
       
-      // Force scroll to bottom on new incoming message
-      setTimeout(() => { try { messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); } catch (e) {} }, 40);
+      // --- SMART SCROLL LOGIC ---
+      // Only scroll if it's my message OR if I'm already at the bottom.
+      // If I'm reading old history, do NOT scroll me down.
+      const isMine = data.socketId === socketRef.current?.id;
+      if (isMine || isUserNearBottom()) {
+          setTimeout(() => { try { messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); } catch (e) {} }, 40);
+      }
     });
 
     socket.on("reaction_updated", (data) => {
@@ -370,13 +383,16 @@ function ChatRoom({ username, onLogout }) {
   }, [messageList, isLoadingMore]);
 
 
-  // Auto scroll when images load
+  // --- SMART AUTO SCROLL FOR IMAGES ---
   const handleImageLoad = () => {
-    // Only auto-scroll if we are NOT loading history
+    // 1. If we are currently fetching history (loadingMore), DO NOT SCROLL.
+    // 2. If the user is viewing old messages (not near bottom), DO NOT SCROLL.
     if (!isLoadingMore && !loadingHistory) {
-         setTimeout(() => {
-            try { messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); } catch (e) {}
-         }, 80);
+         if (isUserNearBottom()) {
+             setTimeout(() => {
+                try { messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); } catch (e) {}
+             }, 80);
+         }
     }
   };
 
