@@ -17,6 +17,32 @@ function formatTime(dateInput) {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+// --- HELPER: Detect Links in Text ---
+// Ye function text mein se URL dhoondh kar usse clickable <a> tag banata hai
+const renderMessageWithLinks = (text) => {
+  if (!text) return "";
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  const parts = text.split(urlRegex);
+  
+  return parts.map((part, index) => {
+    if (part.match(urlRegex)) {
+      return (
+        <a 
+          key={index} 
+          href={part} 
+          target="_blank" 
+          rel="noopener noreferrer" 
+          style={{ color: '#60a5fa', textDecoration: 'underline', wordBreak: 'break-all' }}
+          onClick={(e) => e.stopPropagation()} // Bubble click prevent karne ke liye
+        >
+          {part}
+        </a>
+      );
+    }
+    return part;
+  });
+};
+
 // --- MAIN APP COMPONENT (Auth Handler) ---
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -369,9 +395,9 @@ function ChatRoom({ username, onLogout }) {
                             <div className="user-info-row">
                                 <div className="user-avatar-wrapper">
                                     <img 
-                                        src={`https://api.dicebear.com/7.x/notionists/svg?seed=${user.displayName}&backgroundColor=b6e3f4,c0aede,d1d4f9`} 
-                                        alt="avatar" 
-                                        className="user-list-avatar"
+                                            src={`https://api.dicebear.com/7.x/notionists/svg?seed=${user.displayName}&backgroundColor=b6e3f4,c0aede,d1d4f9`} 
+                                            alt="avatar" 
+                                            className="user-list-avatar"
                                     />
                                     <span className="user-online-dot"></span>
                                 </div>
@@ -411,8 +437,6 @@ function ChatRoom({ username, onLogout }) {
           </div>
 
           <div className="header-controls">
-             {/* REMOVED: .current-user-badge is gone as requested */}
-
             <button className="icon-btn" onClick={toggleMute}>
               {isMuted ? (
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 5L6 9H2v6h4l5 4V5z"></path><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>
@@ -488,7 +512,10 @@ function ChatRoom({ username, onLogout }) {
                   <div style={{ fontWeight: 600, marginBottom: 4, fontSize: '0.9em' }}>
                     {isMine ? "You" : (msg.displayName || "Anon")}
                   </div>
-                  <div>{msg.message}</div>
+                  
+                  {/* --- UPDATED: RENDER WITH LINKS --- */}
+                  <div>{renderMessageWithLinks(msg.message)}</div>
+                  
                   <div className="meta">{formatTime(msg.time)}</div>
 
                   {/* Added 'visible' class based on state */}

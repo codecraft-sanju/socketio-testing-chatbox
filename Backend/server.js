@@ -16,7 +16,7 @@ mongoose.connect(process.env.MONGO_URI || "mongodb+srv://sanjaychoudhary01818_db
 
 // --- MONGOOSE SCHEMA ---
 const messageSchema = new mongoose.Schema({
-  id: { type: String, unique: true },
+  id: { type: String, unique: true }, // unique: true duplicate rokega
   message: String,
   time: String,
   socketId: String,
@@ -30,7 +30,7 @@ const messageSchema = new mongoose.Schema({
 const Message = mongoose.model("Message", messageSchema);
 
 // --- SERVER SETUP ---
-const CLIENT_URL ="https://socketio-testing-chatbox.vercel.app";
+const CLIENT_URL = "https://socketio-testing-chatbox.vercel.app";
 
 app.use(cors({
   origin: (origin, callback) => {
@@ -56,20 +56,15 @@ app.get("/", (req, res) => {
 
 // STATE
 const connectedSockets = new Set();
-const messageIds = new Set(); 
+// ❌ REMOVED: const messageIds = new Set(); (Yeh memory leak kar raha tha)
 
-// --- UPDATED FUNCTION: Broadcast Full User List ---
+// --- FUNCTION: Broadcast Full User List ---
 async function broadcastOnlineUsers() {
-  // Fetch all connected sockets to get their data
   const sockets = await io.fetchSockets();
-  
-  // Map them to a clean array of objects
   const usersList = sockets.map(s => ({
     socketId: s.id,
-    displayName: s.data.displayName || `User-${s.id.slice(0,5)}`
+    displayName: s.data.displayName || `User-${s.id.slice(0, 5)}`
   }));
-
-  // Emit the list to everyone
   io.emit("online_users", usersList);
 }
 
@@ -77,13 +72,13 @@ io.on("connection", async (socket) => {
   console.log(`[+] User Joined: ${socket.id}`);
   connectedSockets.add(socket.id);
 
-  socket.data.displayName = `User-${socket.id.slice(0,5)}`;
+  socket.data.displayName = `User-${socket.id.slice(0, 5)}`;
 
   // --- 1. LOAD HISTORY FROM DB ---
   try {
     const history = await Message.find().sort({ createdAt: -1 }).limit(50);
     socket.emit("history", history.reverse());
-    history.forEach(m => messageIds.add(m.id));
+    // ❌ REMOVED: messageIds.add logic here (Not needed anymore)
   } catch (err) {
     console.error("Error loading history:", err);
   }
@@ -93,11 +88,9 @@ io.on("connection", async (socket) => {
 
   // --- HANDLE IDENTIFY ---
   socket.on("identify", (payload) => {
-    const name = payload?.displayName || `User-${socket.id.slice(0,5)}`;
+    const name = payload?.displayName || `User-${socket.id.slice(0, 5)}`;
     socket.data.displayName = name;
     socket.broadcast.emit("user_joined", { displayName: name });
-    
-    // Update list whenever someone identifies with a new name
     broadcastOnlineUsers();
   });
 
@@ -106,7 +99,7 @@ io.on("connection", async (socket) => {
     try {
       const msg = await Message.findOne({ id: messageId });
       if (msg) {
-        let reactions = { ...msg.reactions }; 
+        let reactions = { ...msg.reactions };
         if (!reactions) reactions = {};
 
         let previousEmoji = null;
@@ -118,26 +111,28 @@ io.on("connection", async (socket) => {
 
         let changed = false;
 
+        // Remove previous reaction if exists
         if (previousEmoji) {
-           const idx = reactions[previousEmoji].indexOf(socket.id);
-           if (idx > -1) {
-             reactions[previousEmoji].splice(idx, 1);
-             if (reactions[previousEmoji].length === 0) {
-               delete reactions[previousEmoji];
-             }
-             changed = true;
-           }
+          const idx = reactions[previousEmoji].indexOf(socket.id);
+          if (idx > -1) {
+            reactions[previousEmoji].splice(idx, 1);
+            if (reactions[previousEmoji].length === 0) {
+              delete reactions[previousEmoji];
+            }
+            changed = true;
+          }
         }
 
+        // Add new reaction (toggle logic)
         if (previousEmoji !== emoji) {
-           if (!reactions[emoji]) reactions[emoji] = [];
-           reactions[emoji].push(socket.id);
-           changed = true;
+          if (!reactions[emoji]) reactions[emoji] = [];
+          reactions[emoji].push(socket.id);
+          changed = true;
         }
 
         if (changed) {
           msg.reactions = reactions;
-          msg.markModified('reactions'); 
+          msg.markModified('reactions');
           await msg.save();
           io.emit("reaction_updated", { id: messageId, reactions: msg.reactions });
         }
@@ -147,7 +142,7 @@ io.on("connection", async (socket) => {
     }
   });
 
-  // --- SEND MESSAGE ---
+  // --- SEND MESSAGE (UPDATED & OPTIMIZED) ---
   socket.on("send_message", async (data, ack) => {
     try {
       if (!data || !data.message) {
@@ -156,38 +151,43 @@ io.on("connection", async (socket) => {
       }
       if (!data.id) data.id = Date.now().toString();
 
-      if (messageIds.has(data.id)) {
-        if (ack) ack({ ok: true, id: data.id });
-        io.emit("receive_message", data);
-        return;
-      }
-
+      // Message Object
       const msgData = {
         id: data.id,
         message: data.message,
         time: data.time || new Date().toISOString(),
         socketId: data.socketId || socket.id,
-        displayName: data.displayName || socket.data.displayName || `User-${socket.id.slice(0,5)}`,
+        displayName: data.displayName || socket.data.displayName || `User-${socket.id.slice(0, 5)}`,
         avatar: data.avatar || null,
         reactions: {},
-        replyTo: data.replyTo || null 
+        replyTo: data.replyTo || null
       };
 
+      // 1. Try to Save to DB directly
       const newMsg = new Message(msgData);
       await newMsg.save();
-      messageIds.add(msgData.id);
 
+      // 2. If saved successfully, Broadcast to everyone
       io.emit("receive_message", msgData);
+      
+      // 3. Send success acknowledgement to sender
       if (ack) ack({ ok: true, id: msgData.id });
 
     } catch (e) {
-      console.error("send_message error:", e);
-      if (ack) ack({ ok: false, error: "server_error" });
+      // ✅ Handle Duplicate ID Error (MongoDB Code 11000)
+      if (e.code === 11000) {
+        // Message already exists. Ignore it but tell client it's OK.
+        // This handles the "Set" logic without using RAM.
+        if (ack) ack({ ok: true, id: data.id });
+      } else {
+        console.error("send_message error:", e);
+        if (ack) ack({ ok: false, error: "server_error" });
+      }
     }
   });
 
   socket.on("typing", (payload) => {
-    const displayName = payload?.displayName || socket.data.displayName || `User-${socket.id.slice(0,5)}`;
+    const displayName = payload?.displayName || socket.data.displayName || `User-${socket.id.slice(0, 5)}`;
     socket.broadcast.emit("user_typing", {
       socketId: socket.id,
       typing: !!payload?.typing,
@@ -199,9 +199,8 @@ io.on("connection", async (socket) => {
   socket.on("disconnect", (reason) => {
     console.log(`[-] User Left: ${socket.id} (${reason})`);
     connectedSockets.delete(socket.id);
-    
+
     socket.broadcast.emit("user_typing", { socketId: socket.id, typing: false });
-    // Update user list on disconnect
     broadcastOnlineUsers();
     socket.broadcast.emit("user_left", { displayName: socket.data.displayName });
   });
