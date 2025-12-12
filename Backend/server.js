@@ -10,27 +10,27 @@ const app = express();
 app.use(express.json());
 
 // --- MONGODB CONNECTION ---
-mongoose.connect("mongodb+srv://sanjaychoudhary01818_db_user:sanju098@cluster0.otatmnk.mongodb.net/?appName=Cluster0")
+mongoose.connect(process.env.MONGO_URI || "mongodb://127.0.0.1:27017/chat-app")
   .then(() => console.log("✅ MongoDB Connected"))
   .catch((err) => console.error("❌ MongoDB Error:", err));
 
 // --- MONGOOSE SCHEMA ---
 const messageSchema = new mongoose.Schema({
-  id: { type: String, unique: true }, // Custom ID from frontend
+  id: { type: String, unique: true },
   message: String,
   time: String,
   socketId: String,
   displayName: String,
   avatar: String,
-  replyTo: { type: Object, default: null }, // Stores the reply object
-  reactions: { type: Object, default: {} }, // Flexible object for reactions { "emoji": ["user_id"] }
-  createdAt: { type: Date, default: Date.now } // For sorting
+  replyTo: { type: Object, default: null },
+  reactions: { type: Object, default: {} },
+  createdAt: { type: Date, default: Date.now }
 });
 
 const Message = mongoose.model("Message", messageSchema);
 
-
-const CLIENT_URL = process.env.CLIENT_URL || "https://socketio-testing-chatbox.vercel.app";
+// --- SERVER SETUP ---
+const CLIENT_URL ="https://socketio-testing-chatbox.vercel.app";
 
 app.use(cors({
   origin: (origin, callback) => {
@@ -54,13 +54,23 @@ app.get("/", (req, res) => {
   res.send({ status: "Active", clients: io.engine.clientsCount, db: mongoose.connection.readyState === 1 ? "Connected" : "Disconnected" });
 });
 
-// STATE (In-memory for active connections only)
+// STATE
 const connectedSockets = new Set();
-// Note: messageHistory array remove kar diya hai, ab DB use hoga.
-const messageIds = new Set(); // To prevent duplicate rapid processing (optional cache)
+const messageIds = new Set(); 
 
-function broadcastUserCounts() {
-  io.emit("users_count", { total: connectedSockets.size });
+// --- UPDATED FUNCTION: Broadcast Full User List ---
+async function broadcastOnlineUsers() {
+  // Fetch all connected sockets to get their data
+  const sockets = await io.fetchSockets();
+  
+  // Map them to a clean array of objects
+  const usersList = sockets.map(s => ({
+    socketId: s.id,
+    displayName: s.data.displayName || `User-${s.id.slice(0,5)}`
+  }));
+
+  // Emit the list to everyone
+  io.emit("online_users", usersList);
 }
 
 io.on("connection", async (socket) => {
@@ -71,39 +81,34 @@ io.on("connection", async (socket) => {
 
   // --- 1. LOAD HISTORY FROM DB ---
   try {
-    // Last 50 messages fetch karein
     const history = await Message.find().sort({ createdAt: -1 }).limit(50);
-    // Reverse taaki purane upar aur naye neeche dikhein
     socket.emit("history", history.reverse());
-    
-    // Sync local ID cache (optional optimization)
     history.forEach(m => messageIds.add(m.id));
   } catch (err) {
     console.error("Error loading history:", err);
   }
 
-  broadcastUserCounts();
+  // Initial Broadcast
+  broadcastOnlineUsers();
 
   // --- HANDLE IDENTIFY ---
   socket.on("identify", (payload) => {
     const name = payload?.displayName || `User-${socket.id.slice(0,5)}`;
     socket.data.displayName = name;
     socket.broadcast.emit("user_joined", { displayName: name });
+    
+    // Update list whenever someone identifies with a new name
+    broadcastOnlineUsers();
   });
 
-  // --- REACTION TOGGLE LOGIC (PERSISTED) ---
+  // --- REACTION TOGGLE LOGIC ---
   socket.on("message_reaction", async ({ messageId, emoji }) => {
     try {
-      // DB se message dhundho
       const msg = await Message.findOne({ id: messageId });
-      
       if (msg) {
-        // Mongoose Mixed type ke saath direct object modify karna tricky ho sakta hai
-        // isliye hum object copy karke modify karenge
         let reactions = { ...msg.reactions }; 
         if (!reactions) reactions = {};
 
-        // 1. Find if user already reacted
         let previousEmoji = null;
         Object.keys(reactions).forEach(key => {
           if (reactions[key].includes(socket.id)) {
@@ -113,7 +118,6 @@ io.on("connection", async (socket) => {
 
         let changed = false;
 
-        // 2. Remove previous reaction
         if (previousEmoji) {
            const idx = reactions[previousEmoji].indexOf(socket.id);
            if (idx > -1) {
@@ -125,7 +129,6 @@ io.on("connection", async (socket) => {
            }
         }
 
-        // 3. Add new reaction (if different)
         if (previousEmoji !== emoji) {
            if (!reactions[emoji]) reactions[emoji] = [];
            reactions[emoji].push(socket.id);
@@ -133,13 +136,9 @@ io.on("connection", async (socket) => {
         }
 
         if (changed) {
-          // Update DB
-          // Note: markModified is crucial for Mixed types in Mongoose
           msg.reactions = reactions;
           msg.markModified('reactions'); 
           await msg.save();
-
-          // Broadcast updated reactions
           io.emit("reaction_updated", { id: messageId, reactions: msg.reactions });
         }
       }
@@ -148,7 +147,7 @@ io.on("connection", async (socket) => {
     }
   });
 
-  // --- SEND MESSAGE (PERSISTED) ---
+  // --- SEND MESSAGE ---
   socket.on("send_message", async (data, ack) => {
     try {
       if (!data || !data.message) {
@@ -157,7 +156,6 @@ io.on("connection", async (socket) => {
       }
       if (!data.id) data.id = Date.now().toString();
 
-      // Duplicate check in memory (optional but good for safety)
       if (messageIds.has(data.id)) {
         if (ack) ack({ ok: true, id: data.id });
         io.emit("receive_message", data);
@@ -175,11 +173,8 @@ io.on("connection", async (socket) => {
         replyTo: data.replyTo || null 
       };
 
-      // SAVE TO DB
       const newMsg = new Message(msgData);
       await newMsg.save();
-
-      // Update in-memory cache
       messageIds.add(msgData.id);
 
       io.emit("receive_message", msgData);
@@ -206,7 +201,8 @@ io.on("connection", async (socket) => {
     connectedSockets.delete(socket.id);
     
     socket.broadcast.emit("user_typing", { socketId: socket.id, typing: false });
-    broadcastUserCounts();
+    // Update user list on disconnect
+    broadcastOnlineUsers();
     socket.broadcast.emit("user_left", { displayName: socket.data.displayName });
   });
 });
@@ -215,5 +211,3 @@ const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
   console.log(`🚀 Server running on PORT ${PORT}`);
 });
-
-

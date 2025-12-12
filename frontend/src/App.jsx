@@ -117,7 +117,11 @@ function ChatRoom({ username, onLogout }) {
   const [messageList, setMessageList] = useState([]);
   const [connected, setConnected] = useState(false);
   const [typingUsers, setTypingUsers] = useState({});
-  const [totalUsers, setTotalUsers] = useState(1);
+  
+  // --- NEW: State for User List Logic ---
+  const [onlineUsersList, setOnlineUsersList] = useState([]); // Stores array of users
+  const [showUserListModal, setShowUserListModal] = useState(false); // Controls modal visibility
+
   const [showMenu, setShowMenu] = useState(false); 
   const [isMuted, setIsMuted] = useState(() => localStorage.getItem("chat_muted") === "true");
   
@@ -156,9 +160,8 @@ function ChatRoom({ username, onLogout }) {
 
   // --- SOCKET CONNECTION ---
   useEffect(() => {
-    // NOTE: Change this URL to your deployed backend or localhost
+    // IMPORTANT: Make sure this matches your deployed backend or localhost
     const SOCKET_URL = "https://socketio-testing-chatbox.onrender.com"; 
-    // const SOCKET_URL = "http://localhost:3001"; // Use this for local testing
 
     const socket = ioClient(SOCKET_URL, {
       transports: ["websocket"],
@@ -177,6 +180,7 @@ function ChatRoom({ username, onLogout }) {
       console.log("socket disconnected", reason);
       setConnected(false);
       setTypingUsers({});
+      setOnlineUsersList([]); // Clear list on disconnect
     });
 
     socket.on("user_joined", (data) => {
@@ -248,8 +252,11 @@ function ChatRoom({ username, onLogout }) {
       });
     });
 
-    socket.on("users_count", (payload) => {
-      if (payload && typeof payload.total === "number") setTotalUsers(payload.total);
+    // --- NEW: Receive Online Users List ---
+    socket.on("online_users", (usersArray) => {
+      if (Array.isArray(usersArray)) {
+        setOnlineUsersList(usersArray);
+      }
     });
 
     return () => {
@@ -326,45 +333,85 @@ function ChatRoom({ username, onLogout }) {
       setSelectedMsgId(null); // Close selection after clicking reply
   };
 
-  // --- NEW: Toggle Message Selection (Click to show buttons) ---
+  // --- Toggle Message Selection (Click to show buttons) ---
   const handleMessageClick = (e, msgId) => {
       e.stopPropagation(); // Stop click from hitting the background
-      // If clicked same message, close it. If different, open that one.
       setSelectedMsgId(prev => prev === msgId ? null : msgId);
-      // If we switch messages, close the emoji picker if it was open on another message
       if (activeReactionId && activeReactionId !== msgId) {
           setActiveReactionId(null);
       }
   };
 
-  const otherUsersCount = Math.max(0, totalUsers - 1);
   const typingArr = Object.values(typingUsers);
+  
+  // Counts
+  const totalUsersCount = onlineUsersList.length;
+  const otherUsersCount = Math.max(0, totalUsersCount - 1);
 
   return (
     <div className="app-container">
       <StyleSheet />
       <Toaster />
 
+      {/* --- NEW: USER LIST MODAL --- */}
+      {showUserListModal && (
+        <div className="modal-backdrop" onClick={() => setShowUserListModal(false)}>
+           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-header">
+                  <h3>Online Users ({totalUsersCount})</h3>
+                  <button className="close-modal-btn" onClick={() => setShowUserListModal(false)}>✕</button>
+              </div>
+              <div className="modal-body">
+                  {onlineUsersList.map(user => {
+                      const isMe = user.socketId === socketRef.current?.id;
+                      return (
+                        <div key={user.socketId} className={`user-list-item ${isMe ? 'is-me' : ''}`}>
+                            <div className="user-info-row">
+                                <div className="user-avatar-wrapper">
+                                    <img 
+                                        src={`https://api.dicebear.com/7.x/notionists/svg?seed=${user.displayName}&backgroundColor=b6e3f4,c0aede,d1d4f9`} 
+                                        alt="avatar" 
+                                        className="user-list-avatar"
+                                    />
+                                    <span className="user-online-dot"></span>
+                                </div>
+                                <span className="user-list-name">
+                                    {user.displayName} {isMe && <span className="me-tag">(You)</span>}
+                                </span>
+                            </div>
+                        </div>
+                      );
+                  })}
+              </div>
+           </div>
+        </div>
+      )}
+
       <div className="chat-card">
         {/* HEADER */}
         <div className="chat-header">
           <div>
             <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "var(--text-main)" }}>Public Lounge</h2>
-            <div style={{ fontSize: 12, color: "var(--text-sub)", marginTop: 2 }}>
+            
+            {/* CLICKABLE STATUS AREA */}
+            <div 
+                className="status-clickable" 
+                onClick={() => setShowUserListModal(true)}
+                title="Click to see who is online"
+            >
               <span className={`status-dot ${connected ? "online" : "offline"}`} />
-              {connected ? `${otherUsersCount} others online` : "Connecting..."}
+              <span style={{ marginRight: 4 }}>
+                  {connected ? `${otherUsersCount} others online` : "Connecting..."}
+              </span>
+              {/* Chevron Icon for indication */}
+              {connected && (
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}><polyline points="6 9 12 15 18 9"></polyline></svg>
+              )}
             </div>
           </div>
 
           <div className="header-controls">
-             {/* --- STYLISH NAME BADGE --- */}
-             <div className="current-user-badge">
-                <svg className="badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-                  <circle cx="12" cy="7" r="4"></circle>
-                </svg>
-                {username}
-             </div>
+             {/* REMOVED: .current-user-badge is gone as requested */}
 
             <button className="icon-btn" onClick={toggleMute}>
               {isMuted ? (
@@ -374,7 +421,7 @@ function ChatRoom({ username, onLogout }) {
               )}
             </button>
             
-            {/* 👇 USER DROPDOWN MENU CONTAINER */}
+            {/* USER AVATAR & DROPDOWN */}
             <div style={{ position: 'relative' }}>
                 <img
                   src={`https://api.dicebear.com/7.x/notionists/svg?seed=${username}&backgroundColor=b6e3f4,c0aede,d1d4f9`}
@@ -384,7 +431,6 @@ function ChatRoom({ username, onLogout }) {
                   style={{ cursor: "pointer", border: showMenu ? "2px solid #ef4444" : "2px solid var(--chat-bg)", boxShadow: '0 0 0 2px var(--border)' }}
                 />
                 
-                {/* 👇 DROPDOWN MENU */}
                 {showMenu && (
                   <div className="dropdown-menu">
                       <div className="menu-item danger" onClick={onLogout}>
@@ -403,7 +449,7 @@ function ChatRoom({ username, onLogout }) {
           onClick={() => { 
               setShowMenu(false); 
               setActiveReactionId(null); 
-              setSelectedMsgId(null); // Clear selection on background click
+              setSelectedMsgId(null); 
           }}
         > 
           {messageList.length === 0 && (
@@ -551,6 +597,9 @@ const StyleSheet = () => (
       --shadow-color: rgba(0,0,0,0.4);
       --dropdown-bg: rgba(30, 41, 59, 0.95);
       --dropdown-hover: #334155;
+      /* Modal Specific */
+      --modal-overlay: rgba(0, 0, 0, 0.7);
+      --modal-bg: #1e293b;
     }
     
     body { margin: 0; font-family: 'Inter', system-ui, -apple-system, sans-serif; background: var(--bg); transition: background 0.3s ease; color: var(--text-main); }
@@ -598,6 +647,8 @@ const StyleSheet = () => (
     .header-controls { display: flex; align-items: center; gap: 12px; }
     .icon-btn { background: transparent; border: none; cursor: pointer; color: var(--text-sub); padding: 6px; border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: background 0.2s, color 0.2s; }
     .icon-btn:hover { background: var(--bg); color: var(--text-main); }
+    .status-clickable { cursor: pointer; display: flex; align-items: center; font-size: 12px; color: var(--text-sub); margin-top: 2px; transition: color 0.2s; user-select: none; }
+    .status-clickable:hover { color: var(--primary); }
     .status-dot { height:8px; width:8px; border-radius:50%; display:inline-block; margin-right:6px;}
     .online { background:#22c55e; box-shadow:0 0 8px #22c55e; }
     .offline { background:#ef4444; }
@@ -624,7 +675,6 @@ const StyleSheet = () => (
         z-index: 5;
     }
     
-    /* --- NEW RULE: Only show when 'visible' class is added via Click --- */
     .action-btns-group.visible { 
         opacity: 1; 
         pointer-events: auto;
@@ -709,7 +759,7 @@ const StyleSheet = () => (
     .send-btn { background:var(--primary); color:white; border:none; width:46px; height:46px; border-radius:50%; cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink: 0; margin-bottom: 2px; }
     .send-btn:active { transform:scale(.95); }
 
-    /* --- NEW DROPDOWN MENU STYLES --- */
+    /* --- DROPDOWN MENU STYLES --- */
     .dropdown-menu {
         position: absolute;
         top: 50px; right: 0;
@@ -737,16 +787,76 @@ const StyleSheet = () => (
         transition: background 0.2s;
     }
     .menu-item:hover { background: var(--dropdown-hover); }
-    
-    .menu-divider { height: 1px; background: var(--border); margin: 4px 0; }
-    
     .menu-item.danger { color: #ef4444; }
     .menu-item.danger:hover { background: rgba(239, 68, 68, 0.1); }
 
     @keyframes scaleIn { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-
     @keyframes slideIn { from { opacity:0; transform:translateY(10px);} to { opacity:1; transform:translateY(0);} }
     @keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
+
+    /* --- NEW: USER LIST MODAL CSS --- */
+    .modal-backdrop {
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background: var(--modal-overlay);
+        backdrop-filter: blur(3px);
+        display: flex; justify-content: center; align-items: center;
+        z-index: 999;
+        animation: fadeIn 0.2s ease-out;
+    }
+
+    .modal-content {
+        background: var(--modal-bg);
+        width: 100%; max-width: 400px; max-height: 80vh;
+        border-radius: 20px;
+        border: 1px solid var(--border);
+        box-shadow: 0 20px 40px var(--shadow-color);
+        display: flex; flex-direction: column;
+        overflow: hidden;
+        animation: scaleUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .modal-header {
+        padding: 16px 20px;
+        border-bottom: 1px solid var(--border);
+        display: flex; justify-content: space-between; align-items: center;
+        background: rgba(255, 255, 255, 0.03);
+    }
+    .modal-header h3 { margin: 0; font-size: 16px; font-weight: 600; color: var(--text-main); }
+    .close-modal-btn {
+        background: none; border: none; cursor: pointer; color: var(--text-sub);
+        font-size: 18px; padding: 4px; border-radius: 50%;
+        transition: all 0.2s; display: flex; align-items: center; justify-content: center; width: 32px; height: 32px;
+    }
+    .close-modal-btn:hover { background: rgba(255,255,255,0.1); color: var(--text-main); }
+
+    .modal-body {
+        padding: 10px;
+        overflow-y: auto;
+    }
+
+    .user-list-item {
+        padding: 10px;
+        margin-bottom: 4px;
+        border-radius: 12px;
+        transition: background 0.2s;
+    }
+    .user-list-item:hover { background: rgba(255,255,255,0.05); }
+    .user-list-item.is-me { background: rgba(79, 70, 229, 0.15); border: 1px solid rgba(79, 70, 229, 0.3); }
+
+    .user-info-row { display: flex; align-items: center; gap: 12px; }
+    
+    .user-avatar-wrapper { position: relative; width: 36px; height: 36px; }
+    .user-list-avatar { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; border: 2px solid var(--bg); }
+    .user-online-dot { 
+        position: absolute; bottom: 0; right: 0; width: 10px; height: 10px; 
+        background: #22c55e; border-radius: 50%; border: 2px solid var(--modal-bg);
+    }
+
+    .user-list-name { font-size: 14px; font-weight: 500; color: var(--text-main); }
+    .me-tag { margin-left: 6px; font-size: 11px; color: var(--primary); font-weight: 700; background: rgba(79, 70, 229, 0.2); padding: 2px 6px; border-radius: 6px; }
+
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes scaleUp { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 
     @media (max-width: 600px) {
       .app-container { padding: 0; height: 100dvh; }
@@ -757,24 +867,7 @@ const StyleSheet = () => (
       .action-btn { width: 30px; height: 30px; font-size: 16px; }
       .reaction-picker-popup { grid-template-columns: repeat(3, 1fr); width: 140px; top: -90px; }
       .reply-subtitle { max-width: 250px; }
+      .modal-content { max-width: 90%; max-height: 70vh; }
     }
-
-    /* --- BADGE (Updated to use Vars) --- */
-    .current-user-badge {
-      background: linear-gradient(135deg, var(--primary-light) 0%, var(--bg) 100%);
-      color: var(--primary);
-      padding: 6px 12px;
-      border-radius: 30px;
-      font-size: 13px;
-      font-weight: 700;
-      display: flex; align-items: center; gap: 6px; margin-right: 12px;
-      border: 1px solid var(--border);
-      box-shadow: 0 2px 6px var(--shadow-color);
-      transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
-      cursor: default; user-select: none;
-    }
-    .current-user-badge:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(79, 70, 229, 0.2); background: var(--chat-bg); border-color: var(--primary); }
-    .badge-icon { width: 14px; height: 14px; opacity: 0.8; }
-    @media (max-width: 600px) { .current-user-badge { padding: 4px 10px; font-size: 12px; margin-right: 8px; } }
   `}</style>
 );
