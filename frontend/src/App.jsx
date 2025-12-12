@@ -156,7 +156,9 @@ function ChatRoom({ username, onLogout }) {
 
   // --- SOCKET CONNECTION ---
   useEffect(() => {
-    const SOCKET_URL = "https://socketio-testing-chatbox.onrender.com";
+    // NOTE: Change this URL to your deployed backend or localhost
+    const SOCKET_URL = "https://socketio-testing-chatbox.onrender.com"; 
+    // const SOCKET_URL = "http://localhost:3001"; // Use this for local testing
 
     const socket = ioClient(SOCKET_URL, {
       transports: ["websocket"],
@@ -397,12 +399,12 @@ function ChatRoom({ username, onLogout }) {
 
         {/* MESSAGES */}
         <div 
-            className="messages-area" 
-            onClick={() => { 
-                setShowMenu(false); 
-                setActiveReactionId(null); 
-                setSelectedMsgId(null); // Clear selection on background click
-            }}
+          className="messages-area" 
+          onClick={() => { 
+              setShowMenu(false); 
+              setActiveReactionId(null); 
+              setSelectedMsgId(null); // Clear selection on background click
+          }}
         > 
           {messageList.length === 0 && (
             <div style={{ textAlign: "center", marginTop: 40, color: "var(--text-sub)", fontSize: 14 }}>

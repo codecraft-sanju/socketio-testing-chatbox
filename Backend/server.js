@@ -1,13 +1,35 @@
 // backend/server.js
+require("dotenv").config();
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const cors = require("cors");
+const mongoose = require("mongoose");
 
 const app = express();
 app.use(express.json());
 
-// Adjust origin according to your setup
+// --- MONGODB CONNECTION ---
+mongoose.connect("mongodb+srv://sanjaychoudhary01818_db_user:sanju098@cluster0.otatmnk.mongodb.net/?appName=Cluster0")
+  .then(() => console.log("✅ MongoDB Connected"))
+  .catch((err) => console.error("❌ MongoDB Error:", err));
+
+// --- MONGOOSE SCHEMA ---
+const messageSchema = new mongoose.Schema({
+  id: { type: String, unique: true }, // Custom ID from frontend
+  message: String,
+  time: String,
+  socketId: String,
+  displayName: String,
+  avatar: String,
+  replyTo: { type: Object, default: null }, // Stores the reply object
+  reactions: { type: Object, default: {} }, // Flexible object for reactions { "emoji": ["user_id"] }
+  createdAt: { type: Date, default: Date.now } // For sorting
+});
+
+const Message = mongoose.model("Message", messageSchema);
+
+
 const CLIENT_URL = process.env.CLIENT_URL || "https://socketio-testing-chatbox.vercel.app";
 
 app.use(cors({
@@ -29,73 +51,105 @@ const io = new Server(server, {
 });
 
 app.get("/", (req, res) => {
-  res.send({ status: "Active", clients: io.engine.clientsCount });
+  res.send({ status: "Active", clients: io.engine.clientsCount, db: mongoose.connection.readyState === 1 ? "Connected" : "Disconnected" });
 });
 
-// STATE
+// STATE (In-memory for active connections only)
 const connectedSockets = new Set();
-const messageHistory = []; 
-const messageIds = new Set(); 
+// Note: messageHistory array remove kar diya hai, ab DB use hoga.
+const messageIds = new Set(); // To prevent duplicate rapid processing (optional cache)
 
 function broadcastUserCounts() {
   io.emit("users_count", { total: connectedSockets.size });
 }
 
-io.on("connection", (socket) => {
+io.on("connection", async (socket) => {
   console.log(`[+] User Joined: ${socket.id}`);
   connectedSockets.add(socket.id);
 
-  // Default name set kar rahe hain taaki agar identify se pehle disconnect ho to error na aaye
   socket.data.displayName = `User-${socket.id.slice(0,5)}`;
 
-  socket.emit("history", messageHistory);
+  // --- 1. LOAD HISTORY FROM DB ---
+  try {
+    // Last 50 messages fetch karein
+    const history = await Message.find().sort({ createdAt: -1 }).limit(50);
+    // Reverse taaki purane upar aur naye neeche dikhein
+    socket.emit("history", history.reverse());
+    
+    // Sync local ID cache (optional optimization)
+    history.forEach(m => messageIds.add(m.id));
+  } catch (err) {
+    console.error("Error loading history:", err);
+  }
+
   broadcastUserCounts();
 
-  // --- 1. HANDLE IDENTIFY ---
+  // --- HANDLE IDENTIFY ---
   socket.on("identify", (payload) => {
     const name = payload?.displayName || `User-${socket.id.slice(0,5)}`;
     socket.data.displayName = name;
-    
-    // Notify others that user joined
     socket.broadcast.emit("user_joined", { displayName: name });
   });
 
-  // --- REACTION TOGGLE LOGIC ---
-  socket.on("message_reaction", ({ messageId, emoji }) => {
-    const msg = messageHistory.find(m => m.id === messageId);
-    if (msg) {
-        if (!msg.reactions) msg.reactions = {};
+  // --- REACTION TOGGLE LOGIC (PERSISTED) ---
+  socket.on("message_reaction", async ({ messageId, emoji }) => {
+    try {
+      // DB se message dhundho
+      const msg = await Message.findOne({ id: messageId });
+      
+      if (msg) {
+        // Mongoose Mixed type ke saath direct object modify karna tricky ho sakta hai
+        // isliye hum object copy karke modify karenge
+        let reactions = { ...msg.reactions }; 
+        if (!reactions) reactions = {};
 
-        // 1. Find if user already reacted with something
+        // 1. Find if user already reacted
         let previousEmoji = null;
-        Object.keys(msg.reactions).forEach(key => {
-            if (msg.reactions[key].includes(socket.id)) {
-                previousEmoji = key;
-            }
+        Object.keys(reactions).forEach(key => {
+          if (reactions[key].includes(socket.id)) {
+            previousEmoji = key;
+          }
         });
 
-        // 2. Remove the previous reaction (Always step 1)
+        let changed = false;
+
+        // 2. Remove previous reaction
         if (previousEmoji) {
-             const idx = msg.reactions[previousEmoji].indexOf(socket.id);
-             msg.reactions[previousEmoji].splice(idx, 1);
-             // Cleanup empty key
-             if (msg.reactions[previousEmoji].length === 0) {
-                 delete msg.reactions[previousEmoji];
+           const idx = reactions[previousEmoji].indexOf(socket.id);
+           if (idx > -1) {
+             reactions[previousEmoji].splice(idx, 1);
+             if (reactions[previousEmoji].length === 0) {
+               delete reactions[previousEmoji];
              }
+             changed = true;
+           }
         }
 
-        // 3. Add new reaction ONLY if it is DIFFERENT from previous
+        // 3. Add new reaction (if different)
         if (previousEmoji !== emoji) {
-             if (!msg.reactions[emoji]) msg.reactions[emoji] = [];
-             msg.reactions[emoji].push(socket.id);
+           if (!reactions[emoji]) reactions[emoji] = [];
+           reactions[emoji].push(socket.id);
+           changed = true;
         }
 
-        // 4. Broadcast
-        io.emit("reaction_updated", { id: messageId, reactions: msg.reactions });
+        if (changed) {
+          // Update DB
+          // Note: markModified is crucial for Mixed types in Mongoose
+          msg.reactions = reactions;
+          msg.markModified('reactions'); 
+          await msg.save();
+
+          // Broadcast updated reactions
+          io.emit("reaction_updated", { id: messageId, reactions: msg.reactions });
+        }
+      }
+    } catch (e) {
+      console.error("Reaction error:", e);
     }
   });
 
-  socket.on("send_message", (data, ack) => {
+  // --- SEND MESSAGE (PERSISTED) ---
+  socket.on("send_message", async (data, ack) => {
     try {
       if (!data || !data.message) {
         if (ack) ack({ ok: false, error: "invalid_payload" });
@@ -103,13 +157,14 @@ io.on("connection", (socket) => {
       }
       if (!data.id) data.id = Date.now().toString();
 
+      // Duplicate check in memory (optional but good for safety)
       if (messageIds.has(data.id)) {
         if (ack) ack({ ok: true, id: data.id });
         io.emit("receive_message", data);
         return;
       }
 
-      const msg = {
+      const msgData = {
         id: data.id,
         message: data.message,
         time: data.time || new Date().toISOString(),
@@ -117,20 +172,19 @@ io.on("connection", (socket) => {
         displayName: data.displayName || socket.data.displayName || `User-${socket.id.slice(0,5)}`,
         avatar: data.avatar || null,
         reactions: {},
-        // 👇 NEW: Save Reply Data if exists
         replyTo: data.replyTo || null 
       };
 
-      messageHistory.push(msg);
-      messageIds.add(msg.id);
-      
-      if (messageHistory.length > 50) {
-        const removed = messageHistory.shift();
-        if (removed && removed.id) messageIds.delete(removed.id);
-      }
+      // SAVE TO DB
+      const newMsg = new Message(msgData);
+      await newMsg.save();
 
-      io.emit("receive_message", msg);
-      if (ack) ack({ ok: true, id: msg.id });
+      // Update in-memory cache
+      messageIds.add(msgData.id);
+
+      io.emit("receive_message", msgData);
+      if (ack) ack({ ok: true, id: msgData.id });
+
     } catch (e) {
       console.error("send_message error:", e);
       if (ack) ack({ ok: false, error: "server_error" });
@@ -146,18 +200,13 @@ io.on("connection", (socket) => {
     });
   });
 
-  // --- 2. HANDLE DISCONNECT ---
+  // --- HANDLE DISCONNECT ---
   socket.on("disconnect", (reason) => {
     console.log(`[-] User Left: ${socket.id} (${reason})`);
     connectedSockets.delete(socket.id);
     
-    // Stop typing indicator
     socket.broadcast.emit("user_typing", { socketId: socket.id, typing: false });
-    
-    // Update user count
     broadcastUserCounts();
-
-    // Notify others that user left
     socket.broadcast.emit("user_left", { displayName: socket.data.displayName });
   });
 });
@@ -166,3 +215,5 @@ const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
   console.log(`🚀 Server running on PORT ${PORT}`);
 });
+
+
