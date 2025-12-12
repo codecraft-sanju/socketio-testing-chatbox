@@ -124,6 +124,9 @@ function ChatRoom({ username, onLogout }) {
   // Track active reaction picker (Message ID)
   const [activeReactionId, setActiveReactionId] = useState(null);
   
+  // --- NEW: Track which message is selected to show buttons ---
+  const [selectedMsgId, setSelectedMsgId] = useState(null);
+
   // REPLY STATE
   const [replyingTo, setReplyingTo] = useState(null);
 
@@ -311,12 +314,25 @@ function ChatRoom({ username, onLogout }) {
       if(!socketRef.current) return;
       socketRef.current.emit("message_reaction", { messageId: msgId, emoji });
       setActiveReactionId(null);
+      setSelectedMsgId(null); // Close selection after reacting
   };
 
   // --- INIT REPLY ---
   const initReply = (msg) => {
       setReplyingTo(msg);
       inputRef.current?.focus();
+      setSelectedMsgId(null); // Close selection after clicking reply
+  };
+
+  // --- NEW: Toggle Message Selection (Click to show buttons) ---
+  const handleMessageClick = (e, msgId) => {
+      e.stopPropagation(); // Stop click from hitting the background
+      // If clicked same message, close it. If different, open that one.
+      setSelectedMsgId(prev => prev === msgId ? null : msgId);
+      // If we switch messages, close the emoji picker if it was open on another message
+      if (activeReactionId && activeReactionId !== msgId) {
+          setActiveReactionId(null);
+      }
   };
 
   const otherUsersCount = Math.max(0, totalUsers - 1);
@@ -380,7 +396,14 @@ function ChatRoom({ username, onLogout }) {
         </div>
 
         {/* MESSAGES */}
-        <div className="messages-area" onClick={() => { setShowMenu(false); setActiveReactionId(null); }}> 
+        <div 
+            className="messages-area" 
+            onClick={() => { 
+                setShowMenu(false); 
+                setActiveReactionId(null); 
+                setSelectedMsgId(null); // Clear selection on background click
+            }}
+        > 
           {messageList.length === 0 && (
             <div style={{ textAlign: "center", marginTop: 40, color: "var(--text-sub)", fontSize: 14 }}>
               Welcome, {username}! Say Hi! 👋
@@ -393,12 +416,19 @@ function ChatRoom({ username, onLogout }) {
             const avatarUrl = msg.avatar || `https://api.dicebear.com/7.x/notionists/svg?seed=${seed}&backgroundColor=b6e3f4,c0aede,d1d4f9`;
             const isPending = pendingRef.current.has(msg.id);
             const showPicker = activeReactionId === msg.id;
+            
+            // Logic to show buttons (only if this specific message ID is selected)
+            const showActions = selectedMsgId === msg.id;
 
             return (
               <div key={msg.id} className={`message-group ${isMine ? "mine" : "other"}`}>
                 {!isMine && <img src={avatarUrl} className="avatar" alt="User avatar" />}
                 
-                <div className={`bubble ${isPending ? "pending" : ""}`}>
+                <div 
+                    className={`bubble ${isPending ? "pending" : ""}`}
+                    onClick={(e) => handleMessageClick(e, msg.id)} // Add click handler here
+                    style={{ cursor: "pointer" }} // Visual cue that it's clickable
+                >
                   
                   {msg.replyTo && (
                       <div className="reply-quote-in-bubble">
@@ -413,7 +443,8 @@ function ChatRoom({ username, onLogout }) {
                   <div>{msg.message}</div>
                   <div className="meta">{formatTime(msg.time)}</div>
 
-                  <div className="action-btns-group">
+                  {/* Added 'visible' class based on state */}
+                  <div className={`action-btns-group ${showActions ? "visible" : ""}`}>
                       <button className="action-btn" onClick={(e) => { e.stopPropagation(); initReply(msg); }}>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 17 4 12 9 7"></polyline><path d="M20 18v-2a4 4 0 0 0-4-4H4"></path></svg>
                       </button>
@@ -585,11 +616,18 @@ const StyleSheet = () => (
     .action-btns-group {
         position: absolute; top: -12px; right: -5px; 
         display: flex; gap: 4px;
-        opacity: 0; transition: opacity 0.2s;
+        opacity: 0; 
+        pointer-events: none; /* Prevent clicking when invisible */
+        transition: opacity 0.2s;
         z-index: 5;
     }
-    .bubble:hover .action-btns-group { opacity: 1; }
-    @media (max-width: 768px) { .action-btns-group { opacity: 1; top: -14px; } }
+    
+    /* --- NEW RULE: Only show when 'visible' class is added via Click --- */
+    .action-btns-group.visible { 
+        opacity: 1; 
+        pointer-events: auto;
+    }
+    
     .mine .action-btns-group { right: auto; left: -5px; flex-direction: row-reverse; }
 
     .action-btn {
