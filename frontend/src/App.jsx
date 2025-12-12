@@ -3,10 +3,10 @@ import { io as ioClient } from "socket.io-client";
 import { Toaster, toast } from 'react-hot-toast';
 
 // --- CONFIG & UTILS ---
-const FIX_TOKEN = "jhdhhdhdhhsdsdhsdhshdh"; 
+const FIX_TOKEN = "jhdhhdhdhhsdsdhsdhshdh";
 const NOTIFICATION_SOUND = "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3";
 // Available Emojis
-const REACTION_EMOJIS = ["💗", "😽", "😼", "😻", "😿", "😹"]; 
+const REACTION_EMOJIS = ["💗", "😽", "😼", "😻", "😿", "😹"];
 
 function generateId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -22,15 +22,15 @@ const renderMessageWithLinks = (text) => {
   if (!text) return "";
   const urlRegex = /(https?:\/\/[^\s]+)/g;
   const parts = text.split(urlRegex);
-  
+
   return parts.map((part, index) => {
     if (part.match(urlRegex)) {
       return (
-        <a 
-          key={index} 
-          href={part} 
-          target="_blank" 
-          rel="noopener noreferrer" 
+        <a
+          key={index}
+          href={part}
+          target="_blank"
+          rel="noopener noreferrer"
           style={{ color: '#60a5fa', textDecoration: 'underline', wordBreak: 'break-all' }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -47,7 +47,7 @@ export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [username, setUsername] = useState("");
   const [inputName, setInputName] = useState("");
-  const [shakeError, setShakeError] = useState(false); 
+  const [shakeError, setShakeError] = useState(false);
 
   // 1. Check LocalStorage on Load
   useEffect(() => {
@@ -64,13 +64,13 @@ export default function App() {
   const handleLogin = () => {
     if (!inputName.trim()) {
       setShakeError(true);
-      setTimeout(() => setShakeError(false), 500); 
+      setTimeout(() => setShakeError(false), 500);
       return;
     }
-    
+
     localStorage.setItem("chat_app_token", FIX_TOKEN);
     localStorage.setItem("chat_app_username", inputName.trim());
-    
+
     setUsername(inputName.trim());
     setIsLoggedIn(true);
   };
@@ -91,8 +91,8 @@ export default function App() {
 
     return (
       <div className="login-wrapper">
-        <StyleSheet /> 
-        
+        <StyleSheet />
+
         <div className="shape shape-1"></div>
         <div className="shape shape-2"></div>
 
@@ -105,10 +105,10 @@ export default function App() {
           <div className="login-content">
             <h1 className="welcome-title">Hello There! 👋</h1>
             <p className="welcome-subtitle">Join the public lounge to start chatting.</p>
-            
+
             <div className="input-group">
-              <input 
-                className="modern-input" 
+              <input
+                className="modern-input"
                 placeholder="Enter your nickname..."
                 value={inputName}
                 onChange={(e) => setInputName(e.target.value)}
@@ -122,8 +122,8 @@ export default function App() {
             </div>
 
             <button className="modern-btn" onClick={handleLogin}>
-              Join Chat Room 
-              <svg style={{marginLeft:8}} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+              Join Chat Room
+              <svg style={{ marginLeft: 8 }} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
             </button>
           </div>
         </div>
@@ -141,17 +141,21 @@ function ChatRoom({ username, onLogout }) {
   const [messageList, setMessageList] = useState([]);
   const [connected, setConnected] = useState(false);
   const [typingUsers, setTypingUsers] = useState({});
-  
+
+  // Loading states
+  const [loadingHistory, setLoadingHistory] = useState(true); // NEW: chat history loader
+  const [isUploading, setIsUploading] = useState(false); // NEW: show upload spinner next to attach
+
   // --- NEW: State for User List Logic ---
   const [onlineUsersList, setOnlineUsersList] = useState([]); // Stores array of users
   const [showUserListModal, setShowUserListModal] = useState(false); // Controls modal visibility
 
-  const [showMenu, setShowMenu] = useState(false); 
+  const [showMenu, setShowMenu] = useState(false);
   const [isMuted, setIsMuted] = useState(() => localStorage.getItem("chat_muted") === "true");
-  
+
   // Track active reaction picker (Message ID)
   const [activeReactionId, setActiveReactionId] = useState(null);
-  
+
   // --- NEW: Track which message is selected to show buttons ---
   const [selectedMsgId, setSelectedMsgId] = useState(null);
 
@@ -165,8 +169,9 @@ function ChatRoom({ username, onLogout }) {
   const inputRef = useRef(null);
   const pendingRef = useRef(new Map());
   const fileInputRef = useRef(null); // NEW: file input ref
+  const messagesContainerRef = useRef(null); // for scroll tweaks
 
-  const clientDisplayName = useRef(username); 
+  const clientDisplayName = useRef(username);
   const isMutedRef = useRef(isMuted);
 
   // Sync Ref
@@ -186,7 +191,7 @@ function ChatRoom({ username, onLogout }) {
   // --- SOCKET CONNECTION ---
   useEffect(() => {
     // IMPORTANT: Make sure this matches your deployed backend or localhost
-    const SOCKET_URL = "https://socketio-testing-chatbox.onrender.com"; 
+    const SOCKET_URL = "https://socketio-testing-chatbox.onrender.com";
 
     const socket = ioClient(SOCKET_URL, {
       transports: ["websocket"],
@@ -209,26 +214,27 @@ function ChatRoom({ username, onLogout }) {
     });
 
     socket.on("user_joined", (data) => {
-       const name = data.displayName || "A new user";
-       toast.success(`${name} joined`, {
-         duration: 3000,
-         position: 'top-center',
-         style: { background: 'var(--chat-bg)', color: 'var(--primary)', border: '1px solid var(--border)', fontWeight: '600', borderRadius: '20px' },
-         iconTheme: { primary: 'var(--primary)', secondary: '#fff' },
-       });
+      const name = data.displayName || "A new user";
+      toast.success(`${name} joined`, {
+        duration: 3000,
+        position: 'top-center',
+        style: { background: 'var(--chat-bg)', color: 'var(--primary)', border: '1px solid var(--border)', fontWeight: '600', borderRadius: '20px' },
+        iconTheme: { primary: 'var(--primary)', secondary: '#fff' },
+      });
     });
 
     socket.on("user_left", (data) => {
-       const name = data.displayName || "Someone";
-       toast(`${name} left`, {
-         duration: 3000,
-         position: 'top-center',
-         icon: '👋',
-         style: { background: 'var(--chat-bg)', color: '#ef4444', border: '1px solid var(--border)', fontWeight: '600', borderRadius: '20px' },
-       });
+      const name = data.displayName || "Someone";
+      toast(`${name} left`, {
+        duration: 3000,
+        position: 'top-center',
+        icon: '👋',
+        style: { background: 'var(--chat-bg)', color: '#ef4444', border: '1px solid var(--border)', fontWeight: '600', borderRadius: '20px' },
+      });
     });
 
     socket.on("history", (history = []) => {
+      // Received history -> hide loader after merging
       setMessageList((prev) => {
         const merged = new Map();
         history.forEach((m) => { if (m && m.id) merged.set(m.id, m); });
@@ -236,6 +242,11 @@ function ChatRoom({ username, onLogout }) {
         pendingRef.current.forEach((m, id) => { if (!merged.has(id)) merged.set(id, m); });
         return Array.from(merged.values());
       });
+      // small delay to allow UI paint, then scroll
+      setTimeout(() => {
+        try { messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); } catch (e) {}
+      }, 80);
+      setLoadingHistory(false);
     });
 
     socket.on("receive_message", (data) => {
@@ -256,14 +267,17 @@ function ChatRoom({ username, onLogout }) {
           try { audioRef.current?.play().catch(() => {}); } catch (e) {}
         }
       }
+
+      // scroll to bottom on new message
+      setTimeout(() => { try { messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); } catch (e) {} }, 40);
     });
 
     socket.on("reaction_updated", (data) => {
-        setMessageList((prev) => 
-            prev.map((msg) => 
-                msg.id === data.id ? { ...msg, reactions: data.reactions } : msg
-            )
-        );
+      setMessageList((prev) =>
+        prev.map((msg) =>
+          msg.id === data.id ? { ...msg, reactions: data.reactions } : msg
+        )
+      );
     });
 
     socket.on("user_typing", (payload) => {
@@ -288,12 +302,31 @@ function ChatRoom({ username, onLogout }) {
       socket.disconnect();
       socketRef.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Auto scroll
+  // Auto scroll - improved: when messageList changes, scroll but avoid interrupting user if they scrolled up
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messageList, typingUsers, replyingTo]);
+    // If user is near bottom, auto-scroll. Otherwise leave their position.
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    const tolerance = 200; // px from bottom where we still auto-scroll
+    const atBottom = (container.scrollHeight - (container.scrollTop + container.clientHeight)) <= tolerance;
+
+    if (atBottom) {
+      // smooth scroll
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    }
+  }, [messageList]);
+
+  // Auto scroll when images load - handler will call scrollIntoView on messagesEndRef
+  const handleImageLoad = () => {
+    // small timeout to ensure layout settled
+    setTimeout(() => {
+      try { messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); } catch (e) {}
+    }, 80);
+  };
 
   // Typing debounce
   const typingTimeoutRef = useRef(null);
@@ -320,9 +353,9 @@ function ChatRoom({ username, onLogout }) {
       avatar: `https://api.dicebear.com/7.x/notionists/svg?seed=${clientDisplayName.current}&backgroundColor=b6e3f4,c0aede,d1d4f9`,
       reactions: {},
       replyTo: replyingTo ? {
-          id: replyingTo.id,
-          displayName: replyingTo.displayName,
-          message: replyingTo.message
+        id: replyingTo.id,
+        displayName: replyingTo.displayName,
+        message: replyingTo.message
       } : null,
       images: []
     };
@@ -360,6 +393,7 @@ function ChatRoom({ username, onLogout }) {
     const form = new FormData();
     limited.forEach((f) => form.append("images", f));
 
+    setIsUploading(true);
     try {
       const res = await fetch(`${SOCKET_URL}/upload-image`, {
         method: "POST",
@@ -368,6 +402,7 @@ function ChatRoom({ username, onLogout }) {
       const data = await res.json();
       if (!data.ok) {
         toast.error("Upload failed");
+        setIsUploading(false);
         return;
       }
       const images = data.images || [];
@@ -383,9 +418,9 @@ function ChatRoom({ username, onLogout }) {
         avatar: `https://api.dicebear.com/7.x/notionists/svg?seed=${clientDisplayName.current}&backgroundColor=b6e3f4,c0aede,d1d4f9`,
         reactions: {},
         replyTo: replyingTo ? {
-            id: replyingTo.id,
-            displayName: replyingTo.displayName,
-            message: replyingTo.message
+          id: replyingTo.id,
+          displayName: replyingTo.displayName,
+          message: replyingTo.message
         } : null,
         images: images // array of {url, public_id, width, height, format}
       };
@@ -403,6 +438,9 @@ function ChatRoom({ username, onLogout }) {
         if (ack && ack.id) pendingRef.current.delete(ack.id);
       });
 
+      // ensure scroll to bottom after optimistic add
+      setTimeout(() => { try { messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); } catch (e) {} }, 80);
+
     } catch (err) {
       console.error("image upload error:", err);
       toast.error("Image upload failed");
@@ -410,35 +448,36 @@ function ChatRoom({ username, onLogout }) {
       // reset input so same file can be selected again
       e.target.value = "";
       setReplyingTo(null);
+      setIsUploading(false);
     }
   };
 
   // --- HANDLE REACTION ---
   const handleReaction = (msgId, emoji) => {
-      if(!socketRef.current) return;
-      socketRef.current.emit("message_reaction", { messageId: msgId, emoji });
-      setActiveReactionId(null);
-      setSelectedMsgId(null); // Close selection after reacting
+    if (!socketRef.current) return;
+    socketRef.current.emit("message_reaction", { messageId: msgId, emoji });
+    setActiveReactionId(null);
+    setSelectedMsgId(null); // Close selection after reacting
   };
 
   // --- INIT REPLY ---
   const initReply = (msg) => {
-      setReplyingTo(msg);
-      inputRef.current?.focus();
-      setSelectedMsgId(null); // Close selection after clicking reply
+    setReplyingTo(msg);
+    inputRef.current?.focus();
+    setSelectedMsgId(null); // Close selection after clicking reply
   };
 
   // --- Toggle Message Selection (Click to show buttons) ---
   const handleMessageClick = (e, msgId) => {
-      e.stopPropagation(); // Stop click from hitting the background
-      setSelectedMsgId(prev => prev === msgId ? null : msgId);
-      if (activeReactionId && activeReactionId !== msgId) {
-          setActiveReactionId(null);
-      }
+    e.stopPropagation(); // Stop click from hitting the background
+    setSelectedMsgId(prev => prev === msgId ? null : msgId);
+    if (activeReactionId && activeReactionId !== msgId) {
+      setActiveReactionId(null);
+    }
   };
 
   const typingArr = Object.values(typingUsers);
-  
+
   // Counts
   const totalUsersCount = onlineUsersList.length;
   const otherUsersCount = Math.max(0, totalUsersCount - 1);
@@ -448,37 +487,47 @@ function ChatRoom({ username, onLogout }) {
       <StyleSheet />
       <Toaster />
 
+      {/* Chat loading overlay */}
+      {loadingHistory && (
+        <div className="loading-overlay">
+          <div className="loader-box">
+            <div className="spinner large" />
+            <div style={{ marginTop: 12, color: "var(--text-sub)" }}>Loading chats...</div>
+          </div>
+        </div>
+      )}
+
       {/* --- NEW: USER LIST MODAL --- */}
       {showUserListModal && (
         <div className="modal-backdrop" onClick={() => setShowUserListModal(false)}>
-           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-              <div className="modal-header">
-                  <h3>Online Users ({totalUsersCount})</h3>
-                  <button className="close-modal-btn" onClick={() => setShowUserListModal(false)}>✕</button>
-              </div>
-              <div className="modal-body">
-                  {onlineUsersList.map(user => {
-                      const isMe = user.socketId === socketRef.current?.id;
-                      return (
-                        <div key={user.socketId} className={`user-list-item ${isMe ? 'is-me' : ''}`}>
-                            <div className="user-info-row">
-                                <div className="user-avatar-wrapper">
-                                    <img 
-                                            src={`https://api.dicebear.com/7.x/notionists/svg?seed=${user.displayName}&backgroundColor=b6e3f4,c0aede,d1d4f9`} 
-                                            alt="avatar" 
-                                            className="user-list-avatar"
-                                    />
-                                    <span className="user-online-dot"></span>
-                                </div>
-                                <span className="user-list-name">
-                                    {user.displayName} {isMe && <span className="me-tag">(You)</span>}
-                                </span>
-                            </div>
-                        </div>
-                      );
-                  })}
-              </div>
-           </div>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Online Users ({totalUsersCount})</h3>
+              <button className="close-modal-btn" onClick={() => setShowUserListModal(false)}>✕</button>
+            </div>
+            <div className="modal-body">
+              {onlineUsersList.map(user => {
+                const isMe = user.socketId === socketRef.current?.id;
+                return (
+                  <div key={user.socketId} className={`user-list-item ${isMe ? 'is-me' : ''}`}>
+                    <div className="user-info-row">
+                      <div className="user-avatar-wrapper">
+                        <img
+                          src={`https://api.dicebear.com/7.x/notionists/svg?seed=${user.displayName}&backgroundColor=b6e3f4,c0aede,d1d4f9`}
+                          alt="avatar"
+                          className="user-list-avatar"
+                        />
+                        <span className="user-online-dot"></span>
+                      </div>
+                      <span className="user-list-name">
+                        {user.displayName} {isMe && <span className="me-tag">(You)</span>}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
 
@@ -487,19 +536,19 @@ function ChatRoom({ username, onLogout }) {
         <div className="chat-header">
           <div>
             <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "var(--text-main)" }}>Public Lounge</h2>
-            
+
             {/* CLICKABLE STATUS AREA */}
-            <div 
-                className="status-clickable" 
-                onClick={() => setShowUserListModal(true)}
-                title="Click to see who is online"
+            <div
+              className="status-clickable"
+              onClick={() => setShowUserListModal(true)}
+              title="Click to see who is online"
             >
               <span className={`status-dot ${connected ? "online" : "offline"}`} />
               <span style={{ marginRight: 4 }}>
-                  {connected ? `${otherUsersCount} others online` : "Connecting..."}
+                {connected ? `${otherUsersCount} others online` : "Connecting..."}
               </span>
               {connected && (
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}><polyline points="6 9 12 15 18 9"></polyline></svg>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}><polyline points="6 9 12 15 18 9"></polyline></svg>
               )}
             </div>
           </div>
@@ -512,39 +561,40 @@ function ChatRoom({ username, onLogout }) {
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
               )}
             </button>
-            
+
             {/* USER AVATAR & DROPDOWN */}
             <div style={{ position: 'relative' }}>
-                <img
-                  src={`https://api.dicebear.com/7.x/notionists/svg?seed=${username}&backgroundColor=b6e3f4,c0aede,d1d4f9`}
-                  alt="My Avatar"
-                  className="avatar"
-                  onClick={() => setShowMenu(!showMenu)}
-                  style={{ cursor: "pointer", border: showMenu ? "2px solid #ef4444" : "2px solid var(--chat-bg)", boxShadow: '0 0 0 2px var(--border)' }}
-                />
-                
-                {showMenu && (
-                  <div className="dropdown-menu">
-                      <div className="menu-item danger" onClick={onLogout}>
-                          <span style={{fontSize: 16}}>↪</span>
-                          <span>Logout</span>
-                      </div>
+              <img
+                src={`https://api.dicebear.com/7.x/notionists/svg?seed=${username}&backgroundColor=b6e3f4,c0aede,d1d4f9`}
+                alt="My Avatar"
+                className="avatar"
+                onClick={() => setShowMenu(!showMenu)}
+                style={{ cursor: "pointer", border: showMenu ? "2px solid #ef4444" : "2px solid var(--chat-bg)", boxShadow: '0 0 0 2px var(--border)' }}
+              />
+
+              {showMenu && (
+                <div className="dropdown-menu">
+                  <div className="menu-item danger" onClick={onLogout}>
+                    <span style={{ fontSize: 16 }}>↪</span>
+                    <span>Logout</span>
                   </div>
-                )}
+                </div>
+              )}
             </div>
           </div>
         </div>
 
         {/* MESSAGES */}
-        <div 
-          className="messages-area" 
-          onClick={() => { 
-              setShowMenu(false); 
-              setActiveReactionId(null); 
-              setSelectedMsgId(null); 
+        <div
+          className="messages-area"
+          ref={messagesContainerRef}
+          onClick={() => {
+            setShowMenu(false);
+            setActiveReactionId(null);
+            setSelectedMsgId(null);
           }}
-        > 
-          {messageList.length === 0 && (
+        >
+          {messageList.length === 0 && !loadingHistory && (
             <div style={{ textAlign: "center", marginTop: 40, color: "var(--text-sub)", fontSize: 14 }}>
               Welcome, {username}! Say Hi! 👋
             </div>
@@ -556,31 +606,37 @@ function ChatRoom({ username, onLogout }) {
             const avatarUrl = msg.avatar || `https://api.dicebear.com/7.x/notionists/svg?seed=${seed}&backgroundColor=b6e3f4,c0aede,d1d4f9`;
             const isPending = pendingRef.current.has(msg.id);
             const showPicker = activeReactionId === msg.id;
-            
+
             // Logic to show buttons (only if this specific message ID is selected)
             const showActions = selectedMsgId === msg.id;
 
             return (
               <div key={msg.id} className={`message-group ${isMine ? "mine" : "other"}`}>
                 {!isMine && <img src={avatarUrl} className="avatar" alt="User avatar" />}
-                
-                <div 
-                    className={`bubble ${isPending ? "pending" : ""}`}
-                    onClick={(e) => handleMessageClick(e, msg.id)}
-                    style={{ cursor: "pointer" }}
+
+                <div
+                  className={`bubble ${isPending ? "pending" : ""}`}
+                  onClick={(e) => handleMessageClick(e, msg.id)}
+                  style={{ cursor: "pointer", position: "relative" }}
                 >
-                  
+
+                  {isPending && (
+                    <div className="pending-badge">
+                      <div className="spinner" />
+                    </div>
+                  )}
+
                   {msg.replyTo && (
-                      <div className="reply-quote-in-bubble">
-                          <span className="reply-to-name">{msg.replyTo.displayName}</span>
-                          <div className="reply-to-text">{msg.replyTo.message}</div>
-                      </div>
+                    <div className="reply-quote-in-bubble">
+                      <span className="reply-to-name">{msg.replyTo.displayName}</span>
+                      <div className="reply-to-text">{msg.replyTo.message}</div>
+                    </div>
                   )}
 
                   <div style={{ fontWeight: 600, marginBottom: 4, fontSize: '0.9em' }}>
                     {isMine ? "You" : (msg.displayName || "Anon")}
                   </div>
-                  
+
                   {/* --- UPDATED: RENDER WITH LINKS --- */}
                   <div>{renderMessageWithLinks(msg.message)}</div>
 
@@ -594,44 +650,45 @@ function ChatRoom({ username, onLogout }) {
                           alt={`img-${idx}`}
                           className="inline-image"
                           onClick={() => window.open(img.url, "_blank")}
+                          onLoad={handleImageLoad}
                         />
                       ))}
                     </div>
                   )}
-                  
+
                   <div className="meta">{formatTime(msg.time)}</div>
 
                   <div className={`action-btns-group ${showActions ? "visible" : ""}`}>
-                      <button className="action-btn" onClick={(e) => { e.stopPropagation(); initReply(msg); }}>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 17 4 12 9 7"></polyline><path d="M20 18v-2a4 4 0 0 0-4-4H4"></path></svg>
-                      </button>
-                      <button className="action-btn" onClick={(e) => { e.stopPropagation(); setActiveReactionId(showPicker ? null : msg.id); }}>
-                        ☺
-                      </button>
+                    <button className="action-btn" onClick={(e) => { e.stopPropagation(); initReply(msg); }}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 17 4 12 9 7"></polyline><path d="M20 18v-2a4 4 0 0 0-4-4H4"></path></svg>
+                    </button>
+                    <button className="action-btn" onClick={(e) => { e.stopPropagation(); setActiveReactionId(showPicker ? null : msg.id); }}>
+                      ☺
+                    </button>
                   </div>
 
                   {showPicker && (
-                      <div className="reaction-picker-popup" onClick={(e) => e.stopPropagation()}>
-                          {REACTION_EMOJIS.map(emoji => (
-                              <div key={emoji} className="emoji-item" onClick={() => handleReaction(msg.id, emoji)}>
-                                  {emoji}
-                              </div>
-                          ))}
-                      </div>
+                    <div className="reaction-picker-popup" onClick={(e) => e.stopPropagation()}>
+                      {REACTION_EMOJIS.map(emoji => (
+                        <div key={emoji} className="emoji-item" onClick={() => handleReaction(msg.id, emoji)}>
+                          {emoji}
+                        </div>
+                      ))}
+                    </div>
                   )}
 
                   {msg.reactions && Object.keys(msg.reactions).length > 0 && (
-                      <div className="reactions-row">
-                          {Object.entries(msg.reactions).map(([emoji, userIds]) => {
-                             if(!userIds || userIds.length === 0) return null;
-                             const iReacted = userIds.includes(socketRef.current?.id);
-                             return (
-                                  <div key={emoji} className={`reaction-pill ${iReacted ? "active-reaction" : ""}`} onClick={(e) => { e.stopPropagation(); handleReaction(msg.id, emoji); }}>
-                                     {emoji} <span className="count">{userIds.length}</span>
-                                  </div>
-                             )
-                          })}
-                      </div>
+                    <div className="reactions-row">
+                      {Object.entries(msg.reactions).map(([emoji, userIds]) => {
+                        if (!userIds || userIds.length === 0) return null;
+                        const iReacted = userIds.includes(socketRef.current?.id);
+                        return (
+                          <div key={emoji} className={`reaction-pill ${iReacted ? "active-reaction" : ""}`} onClick={(e) => { e.stopPropagation(); handleReaction(msg.id, emoji); }}>
+                            {emoji} <span className="count">{userIds.length}</span>
+                          </div>
+                        )
+                      })}
+                    </div>
                   )}
                 </div>
               </div>
@@ -640,62 +697,68 @@ function ChatRoom({ username, onLogout }) {
 
           {typingArr.length > 0 && (
             <div className="typing-indicator-inline">
-               <div className="typing-dots"><span></span><span></span><span></span></div>
-               <span style={{ marginLeft: 8 }}><span style={{ fontWeight: 600 }}>{typingArr.length > 2 ? "Several people" : typingArr.join(", ")}</span> is typing...</span>
+              <div className="typing-dots"><span></span><span></span><span></span></div>
+              <span style={{ marginLeft: 8 }}><span style={{ fontWeight: 600 }}>{typingArr.length > 2 ? "Several people" : typingArr.join(", ")}</span> is typing...</span>
             </div>
           )}
-          
+
           <div ref={messagesEndRef} />
         </div>
 
         {/* FOOTER */}
-        <div style={{background: 'var(--chat-bg)', borderTop: '1px solid var(--border)', transition: 'background 0.3s'}}>
-            {replyingTo && (
-                <div className="reply-preview-bar">
-                    <div className="reply-info">
-                        <span className="reply-title">Replying to {replyingTo.displayName}</span>
-                        <span className="reply-subtitle">{replyingTo.message}</span>
-                    </div>
-                    <button className="close-reply-btn" onClick={() => setReplyingTo(null)}>
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                    </button>
-                </div>
-            )}
-
-            <div className="input-area">
-                {/* Hidden file input */}
-                <input
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  ref={fileInputRef}
-                  style={{ display: "none" }}
-                  onChange={handleFilesSelected}
-                />
-
-                {/* Camera / Attachment button */}
-                <button className="icon-btn attach-btn" onClick={handleAttachClick} title="Attach images">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h3l2-3h6l2 3h3a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="3"></circle></svg>
-                </button>
-
-                <textarea
-                    ref={inputRef}
-                    className="msg-input"
-                    value={message}
-                    onChange={(e) => { setMessage(e.target.value); handleTyping(); }}
-                    onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
-                    placeholder="Type a message..."
-                    rows={1}
-                />
-                <button
-                    className="send-btn"
-                    onClick={sendMessage}
-                    disabled={!message.trim()}
-                    style={{ opacity: message.trim() ? 1 : 1 }}
-                >
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
-                </button>
+        <div style={{ background: 'var(--chat-bg)', borderTop: '1px solid var(--border)', transition: 'background 0.3s' }}>
+          {replyingTo && (
+            <div className="reply-preview-bar">
+              <div className="reply-info">
+                <span className="reply-title">Replying to {replyingTo.displayName}</span>
+                <span className="reply-subtitle">{replyingTo.message}</span>
+              </div>
+              <button className="close-reply-btn" onClick={() => setReplyingTo(null)}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+              </button>
             </div>
+          )}
+
+          <div className="input-area">
+            {/* Hidden file input */}
+            <input
+              type="file"
+              accept="image/*"
+              multiple
+              ref={fileInputRef}
+              style={{ display: "none" }}
+              onChange={handleFilesSelected}
+            />
+
+            {/* Camera / Attachment button */}
+            <button className="icon-btn attach-btn" onClick={handleAttachClick} title="Attach images">
+              {isUploading ? (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <div className="spinner small" />
+                </div>
+              ) : (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h3l2-3h6l2 3h3a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="3"></circle></svg>
+              )}
+            </button>
+
+            <textarea
+              ref={inputRef}
+              className="msg-input"
+              value={message}
+              onChange={(e) => { setMessage(e.target.value); handleTyping(); }}
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
+              placeholder="Type a message..."
+              rows={1}
+            />
+            <button
+              className="send-btn"
+              onClick={sendMessage}
+              disabled={!message.trim()}
+              style={{ opacity: message.trim() ? 1 : 1 }}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -710,7 +773,7 @@ const StyleSheet = () => (
       --bg: #0f172a;           /* Deep Slate Background */
       --chat-bg: #1e293b;      /* Slate-800 Chat Card */
       --primary: #6366f1;      /* Slightly brighter Indigo */
-      --primary-dark: #4f46e5; 
+      --primary-dark: #4f46e5;
       --primary-light: #312e81; /* Darker indigo for backgrounds */
       --text-main: #f8fafc;    /* Off-white text */
       --text-sub: #94a3b8;     /* Slate-400 subtext */
@@ -724,21 +787,70 @@ const StyleSheet = () => (
       --modal-overlay: rgba(0, 0, 0, 0.7);
       --modal-bg: #1e293b;
     }
-    
+
     body { margin: 0; font-family: 'Inter', system-ui, -apple-system, sans-serif; background: var(--bg); transition: background 0.3s ease; color: var(--text-main); }
-    
-    .app-container { 
-      display:flex; justify-content:center; align-items:center; 
-      min-height:100dvh; padding:20px; box-sizing:border-box; 
+
+    .app-container {
+      display:flex; justify-content:center; align-items:center;
+      min-height:100dvh; padding:20px; box-sizing:border-box;
     }
-    
-    .chat-card { 
-      width:100%; max-width:700px; height:85vh; 
-      background:var(--chat-bg); border-radius:24px; 
-      box-shadow:0 20px 50px -10px var(--shadow-color); 
+
+    .chat-card {
+      width:100%; max-width:700px; height:85vh;
+      background:var(--chat-bg); border-radius:24px;
+      box-shadow:0 20px 50px -10px var(--shadow-color);
       display:flex; flex-direction:column; overflow:hidden; position:relative;
       border: 1px solid var(--border);
       transition: background 0.3s, border-color 0.3s, box-shadow 0.3s;
+    }
+
+    /* Loading overlay */
+    .loading-overlay {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(2,6,23,0.6);
+      z-index: 1100;
+    }
+    .loader-box {
+      background: rgba(17,24,39,0.9);
+      padding: 18px 28px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.04);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      box-shadow: 0 10px 30px rgba(2,6,23,0.6);
+    }
+    .spinner {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: 2px solid rgba(255,255,255,0.08);
+      border-top-color: var(--primary);
+      animation: spin 0.9s linear infinite;
+    }
+    .spinner.small { width: 16px; height: 16px; border-width: 2px; }
+    .spinner.large { width: 36px; height: 36px; border-width: 3px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* pending badge overlay in bubble */
+    .pending-badge {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      width: 26px;
+      height: 26px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,0,0,0.25);
+      border-radius: 50%;
+      backdrop-filter: blur(4px);
+      border: 1px solid rgba(255,255,255,0.04);
+      z-index: 40;
     }
 
     /* --- LOGIN STYLES --- */
@@ -781,45 +893,45 @@ const StyleSheet = () => (
     .message-group { display:flex; gap:10px; width: 100%; animation:slideIn .2s ease; }
     .message-group.mine { flex-direction: row-reverse; }
     .avatar { width:36px; height:36px; border-radius:50%; background:var(--border); border:2px solid var(--chat-bg); flex-shrink:0; object-fit: cover; }
-    
+
     .bubble { padding: 10px 16px; border-radius: 18px; position: relative; font-size: 15px; line-height: 1.5; box-shadow: 0 1px 2px var(--shadow-color); width: fit-content; max-width: 75%; overflow-wrap: anywhere; word-break: normal; white-space: pre-wrap; transition: background 0.3s, color 0.3s; }
     .mine .bubble { background: var(--mine-bubble); color: white; border-bottom-right-radius: 4px; }
     .other .bubble { background: var(--other-bubble); color: var(--text-main); border-bottom-left-radius: 4px; }
     .meta { font-size: 10px; margin-top: 4px; opacity: 0.7; text-align: right; display: block; margin-bottom: -2px; }
-    .bubble.pending { opacity:0.8; }
+    .bubble.pending { opacity:0.9; filter: brightness(0.98); }
 
     /* --- ACTION BUTTONS (REPLY & REACT) --- */
     .action-btns-group {
-        position: absolute; top: -12px; right: -5px; 
-        display: flex; gap: 4px;
-        opacity: 0; 
-        pointer-events: none; /* Prevent clicking when invisible */
-        transition: opacity 0.2s;
-        z-index: 5;
+      position: absolute; top: -12px; right: -5px;
+      display: flex; gap: 4px;
+      opacity: 0;
+      pointer-events: none; /* Prevent clicking when invisible */
+      transition: opacity 0.2s;
+      z-index: 5;
     }
-    
-    .action-btns-group.visible { 
-        opacity: 1; 
-        pointer-events: auto;
+
+    .action-btns-group.visible {
+      opacity: 1;
+      pointer-events: auto;
     }
-    
+
     .mine .action-btns-group { right: auto; left: -5px; flex-direction: row-reverse; }
 
     .action-btn {
-        width: 26px; height: 26px;
-        border-radius: 50%; border: 1px solid var(--border); background: var(--chat-bg);
-        cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center;
-        box-shadow: 0 2px 5px var(--shadow-color); color: var(--text-sub);
-        transition: transform 0.2s, background 0.3s, border-color 0.3s;
+      width: 26px; height: 26px;
+      border-radius: 50%; border: 1px solid var(--border); background: var(--chat-bg);
+      cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 2px 5px var(--shadow-color); color: var(--text-sub);
+      transition: transform 0.2s, background 0.3s, border-color 0.3s;
     }
     .action-btn:hover { transform: scale(1.1); color: var(--primary); border-color: var(--primary); }
 
     /* --- REPLY QUOTE STYLES --- */
     .reply-quote-in-bubble {
-        margin-bottom: 8px; padding: 8px 10px; border-radius: 8px;
-        background: rgba(0,0,0,0.1); border-left: 4px solid rgba(0,0,0,0.2);
-        font-size: 13px; display: flex; flex-direction: column; gap: 2px;
-        cursor: pointer; user-select: none;
+      margin-bottom: 8px; padding: 8px 10px; border-radius: 8px;
+      background: rgba(0,0,0,0.1); border-left: 4px solid rgba(0,0,0,0.2);
+      font-size: 13px; display: flex; flex-direction: column; gap: 2px;
+      cursor: pointer; user-select: none;
     }
     .mine .reply-quote-in-bubble { background: rgba(0,0,0,0.15); border-left-color: rgba(255,255,255,0.6); }
     .reply-to-name { font-weight: 700; opacity: 0.9; font-size: 11px; }
@@ -827,34 +939,34 @@ const StyleSheet = () => (
 
     /* --- REPLY PREVIEW BAR --- */
     .reply-preview-bar {
-        display: flex; align-items: center; justify-content: space-between;
-        padding: 8px 16px; background: var(--bg);
-        border-bottom: 1px solid var(--border);
-        border-left: 4px solid var(--primary);
-        animation: slideUp 0.2s ease-out;
-        transition: background 0.3s, border-color 0.3s;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 16px; background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      border-left: 4px solid var(--primary);
+      animation: slideUp 0.2s ease-out;
+      transition: background 0.3s, border-color 0.3s;
     }
     .reply-info { display: flex; flex-direction: column; font-size: 13px; overflow: hidden; }
     .reply-title { font-weight: 700; color: var(--primary); margin-bottom: 2px; }
     .reply-subtitle { color: var(--text-sub); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 80vw; }
     .close-reply-btn { background: none; border: none; cursor: pointer; color: var(--text-sub); padding: 4px; display: flex; align-items: center; }
     .close-reply-btn:hover { color: #ef4444; background: rgba(239, 68, 68, 0.1); border-radius: 50%; }
-    
+
     @keyframes slideUp { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 
     /* --- REACTION PICKER --- */
     .reaction-picker-popup {
-        position: absolute; top: -55px; 
-        left: 0; right: auto;
-        background: var(--dropdown-bg); backdrop-filter: blur(8px);
-        border: 1px solid var(--border); padding: 6px 10px;
-        border-radius: 30px;
-        box-shadow: 0 8px 20px var(--shadow-color);
-        display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px; 
-        z-index: 50; animation: popIn 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+      position: absolute; top: -55px;
+      left: 0; right: auto;
+      background: var(--dropdown-bg); backdrop-filter: blur(8px);
+      border: 1px solid var(--border); padding: 6px 10px;
+      border-radius: 30px;
+      box-shadow: 0 8px 20px var(--shadow-color);
+      display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px;
+      z-index: 50; animation: popIn 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
     }
     .mine .reaction-picker-popup { left: auto; right: 0; }
-    
+
     .emoji-item { cursor: pointer; font-size: 20px; transition: transform 0.2s; padding: 4px; border-radius: 50%; display: flex; justify-content: center; align-items: center; }
     .emoji-item:hover { transform: scale(1.3); background: var(--bg); }
     .emoji-item:active { transform: scale(0.9); }
@@ -874,11 +986,11 @@ const StyleSheet = () => (
     .typing-dots span { width: 4px; height: 4px; background: var(--text-sub); border-radius: 50%; animation: bounce 1.4s infinite ease-in-out both; }
     .typing-dots span:nth-child(1) { animation-delay: -0.32s; }
     .typing-dots span:nth-child(2) { animation-delay: -0.16s; }
-    
+
     .input-area { padding:12px 16px; background: var(--chat-bg); display:flex; gap:10px; align-items:flex-end; }
     .msg-input { flex:1; background: var(--input-bg); border:1px solid var(--border); padding:12px 16px; border-radius:24px; outline:none; font-size:15px; transition:all .2s; min-height:24px; max-height:120px; overflow-y:auto; resize:none; line-height: 1.4; font-family: inherit; color: var(--text-main); }
     .msg-input:focus { border-color:var(--primary); box-shadow:0 0 0 3px var(--primary-light); background: var(--chat-bg); }
-    
+
     .send-btn { background:var(--primary); color:white; border:none; width:46px; height:46px; border-radius:50%; cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink: 0; margin-bottom: 2px; }
     .send-btn:active { transform:scale(.95); }
 
@@ -892,30 +1004,30 @@ const StyleSheet = () => (
 
     /* --- DROPDOWN MENU STYLES --- */
     .dropdown-menu {
-        position: absolute;
-        top: 50px; right: 0;
-        width: 180px;
-        background: var(--dropdown-bg);
-        border: 1px solid var(--border);
-        border-radius: 12px;
-        box-shadow: 0 10px 25px var(--shadow-color);
-        backdrop-filter: blur(12px);
-        padding: 6px;
-        display: flex; flex-direction: column; gap: 2px;
-        z-index: 100;
-        animation: scaleIn 0.2s ease-out;
-        transform-origin: top right;
+      position: absolute;
+      top: 50px; right: 0;
+      width: 180px;
+      background: var(--dropdown-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      box-shadow: 0 10px 25px var(--shadow-color);
+      backdrop-filter: blur(12px);
+      padding: 6px;
+      display: flex; flex-direction: column; gap: 2px;
+      z-index: 100;
+      animation: scaleIn 0.2s ease-out;
+      transform-origin: top right;
     }
-    
+
     .menu-item {
-        display: flex; align-items: center; gap: 10px;
-        padding: 10px 12px;
-        border-radius: 8px;
-        cursor: pointer;
-        color: var(--text-main);
-        font-size: 14px;
-        font-weight: 500;
-        transition: background 0.2s;
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      color: var(--text-main);
+      font-size: 14px;
+      font-weight: 500;
+      transition: background 0.2s;
     }
     .menu-item:hover { background: var(--dropdown-hover); }
     .menu-item.danger { color: #ef4444; }
@@ -927,60 +1039,60 @@ const StyleSheet = () => (
 
     /* --- NEW: USER LIST MODAL CSS --- */
     .modal-backdrop {
-        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-        background: var(--modal-overlay);
-        backdrop-filter: blur(3px);
-        display: flex; justify-content: center; align-items: center;
-        z-index: 999;
-        animation: fadeIn 0.2s ease-out;
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: var(--modal-overlay);
+      backdrop-filter: blur(3px);
+      display: flex; justify-content: center; align-items: center;
+      z-index: 999;
+      animation: fadeIn 0.2s ease-out;
     }
 
     .modal-content {
-        background: var(--modal-bg);
-        width: 100%; max-width: 400px; max-height: 80vh;
-        border-radius: 20px;
-        border: 1px solid var(--border);
-        box-shadow: 0 20px 40px var(--shadow-color);
-        display: flex; flex-direction: column;
-        overflow: hidden;
-        animation: scaleUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      background: var(--modal-bg);
+      width: 100%; max-width: 400px; max-height: 80vh;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      box-shadow: 0 20px 40px var(--shadow-color);
+      display: flex; flex-direction: column;
+      overflow: hidden;
+      animation: scaleUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
     }
 
     .modal-header {
-        padding: 16px 20px;
-        border-bottom: 1px solid var(--border);
-        display: flex; justify-content: space-between; align-items: center;
-        background: rgba(255, 255, 255, 0.03);
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex; justify-content: space-between; align-items: center;
+      background: rgba(255, 255, 255, 0.03);
     }
     .modal-header h3 { margin: 0; font-size: 16px; font-weight: 600; color: var(--text-main); }
     .close-modal-btn {
-        background: none; border: none; cursor: pointer; color: var(--text-sub);
-        font-size: 18px; padding: 4px; border-radius: 50%;
-        transition: all 0.2s; display: flex; align-items: center; justify-content: center; width: 32px; height: 32px;
+      background: none; border: none; cursor: pointer; color: var(--text-sub);
+      font-size: 18px; padding: 4px; border-radius: 50%;
+      transition: all 0.2s; display: flex; align-items: center; justify-content: center; width: 32px; height: 32px;
     }
     .close-modal-btn:hover { background: rgba(255,255,255,0.1); color: var(--text-main); }
 
     .modal-body {
-        padding: 10px;
-        overflow-y: auto;
+      padding: 10px;
+      overflow-y: auto;
     }
 
     .user-list-item {
-        padding: 10px;
-        margin-bottom: 4px;
-        border-radius: 12px;
-        transition: background 0.2s;
+      padding: 10px;
+      margin-bottom: 4px;
+      border-radius: 12px;
+      transition: background 0.2s;
     }
     .user-list-item:hover { background: rgba(255,255,255,0.05); }
     .user-list-item.is-me { background: rgba(79, 70, 229, 0.15); border: 1px solid rgba(79, 70, 229, 0.3); }
 
     .user-info-row { display: flex; align-items: center; gap: 12px; }
-    
+
     .user-avatar-wrapper { position: relative; width: 36px; height: 36px; }
     .user-list-avatar { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; border: 2px solid var(--bg); }
-    .user-online-dot { 
-        position: absolute; bottom: 0; right: 0; width: 10px; height: 10px; 
-        background: #22c55e; border-radius: 50%; border: 2px solid var(--modal-bg);
+    .user-online-dot {
+      position: absolute; bottom: 0; right: 0; width: 10px; height: 10px;
+      background: #22c55e; border-radius: 50%; border: 2px solid var(--modal-bg);
     }
 
     .user-list-name { font-size: 14px; font-weight: 500; color: var(--text-main); }
