@@ -10,7 +10,7 @@ const app = express();
 app.use(express.json());
 
 // --- MONGODB CONNECTION ---
-mongoose.connect(process.env.MONGO_URI || "mongodb://127.0.0.1:27017/chat-app")
+mongoose.connect(process.env.MONGO_URI || "mongodb+srv://sanjaychoudhary01818_db_user:sanju098@cluster0.otatmnk.mongodb.net/?appName=Cluster0")
   .then(() => console.log("✅ MongoDB Connected"))
   .catch((err) => console.error("❌ MongoDB Error:", err));
 
