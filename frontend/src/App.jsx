@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useLayoutEffect } from "react";
 import { io as ioClient } from "socket.io-client";
 import { Toaster, toast } from 'react-hot-toast';
 
@@ -143,12 +143,17 @@ function ChatRoom({ username, onLogout }) {
   const [typingUsers, setTypingUsers] = useState({});
 
   // Loading states
-  const [loadingHistory, setLoadingHistory] = useState(true); // NEW: chat history loader
-  const [isUploading, setIsUploading] = useState(false); // NEW: show upload spinner next to attach
+  const [loadingHistory, setLoadingHistory] = useState(true); // Initial load
+  const [isUploading, setIsUploading] = useState(false); 
+  
+  // --- NEW: Load More / Infinite Scroll States ---
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [hasMoreMessages, setHasMoreMessages] = useState(true);
+  const previousScrollHeightRef = useRef(0); // To restore scroll position
 
-  // --- NEW: State for User List Logic ---
-  const [onlineUsersList, setOnlineUsersList] = useState([]); // Stores array of users
-  const [showUserListModal, setShowUserListModal] = useState(false); // Controls modal visibility
+  // --- User List Logic ---
+  const [onlineUsersList, setOnlineUsersList] = useState([]); 
+  const [showUserListModal, setShowUserListModal] = useState(false); 
 
   const [showMenu, setShowMenu] = useState(false);
   const [isMuted, setIsMuted] = useState(() => localStorage.getItem("chat_muted") === "true");
@@ -156,7 +161,7 @@ function ChatRoom({ username, onLogout }) {
   // Track active reaction picker (Message ID)
   const [activeReactionId, setActiveReactionId] = useState(null);
 
-  // --- NEW: Track which message is selected to show buttons ---
+  // --- Track which message is selected to show buttons ---
   const [selectedMsgId, setSelectedMsgId] = useState(null);
 
   // REPLY STATE
@@ -168,8 +173,8 @@ function ChatRoom({ username, onLogout }) {
   const audioRef = useRef(null);
   const inputRef = useRef(null);
   const pendingRef = useRef(new Map());
-  const fileInputRef = useRef(null); // NEW: file input ref
-  const messagesContainerRef = useRef(null); // for scroll tweaks
+  const fileInputRef = useRef(null);
+  const messagesContainerRef = useRef(null); 
 
   const clientDisplayName = useRef(username);
   const isMutedRef = useRef(isMuted);
@@ -210,7 +215,7 @@ function ChatRoom({ username, onLogout }) {
       console.log("socket disconnected", reason);
       setConnected(false);
       setTypingUsers({});
-      setOnlineUsersList([]); // Clear list on disconnect
+      setOnlineUsersList([]);
     });
 
     socket.on("user_joined", (data) => {
@@ -233,8 +238,8 @@ function ChatRoom({ username, onLogout }) {
       });
     });
 
+    // --- INITIAL HISTORY LOAD ---
     socket.on("history", (history = []) => {
-      // Received history -> hide loader after merging
       setMessageList((prev) => {
         const merged = new Map();
         history.forEach((m) => { if (m && m.id) merged.set(m.id, m); });
@@ -242,11 +247,32 @@ function ChatRoom({ username, onLogout }) {
         pendingRef.current.forEach((m, id) => { if (!merged.has(id)) merged.set(id, m); });
         return Array.from(merged.values());
       });
-      // small delay to allow UI paint, then scroll
+      
+      // Auto scroll to bottom only on initial load
       setTimeout(() => {
         try { messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); } catch (e) {}
       }, 80);
       setLoadingHistory(false);
+    });
+
+    // --- NEW: HANDLE OLDER MESSAGES (Load More) ---
+    socket.on("more_messages_loaded", (olderMessages) => {
+        if (!olderMessages || olderMessages.length === 0) {
+            setHasMoreMessages(false);
+            setIsLoadingMore(false);
+            return;
+        }
+
+        setMessageList((prev) => {
+            const merged = new Map();
+            // Add older messages first
+            olderMessages.forEach((m) => { if (m && m.id) merged.set(m.id, m); });
+            // Then add existing messages
+            prev.forEach((m) => { if (m && m.id && !merged.has(m.id)) merged.set(m.id, m); });
+            return Array.from(merged.values());
+        });
+        
+        // Note: isLoadingMore is set to false in the useLayoutEffect below after scroll adjustment
     });
 
     socket.on("receive_message", (data) => {
@@ -267,8 +293,8 @@ function ChatRoom({ username, onLogout }) {
           try { audioRef.current?.play().catch(() => {}); } catch (e) {}
         }
       }
-
-      // scroll to bottom on new message
+      
+      // Force scroll to bottom on new incoming message
       setTimeout(() => { try { messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); } catch (e) {} }, 40);
     });
 
@@ -291,7 +317,6 @@ function ChatRoom({ username, onLogout }) {
       });
     });
 
-    // --- NEW: Receive Online Users List ---
     socket.on("online_users", (usersArray) => {
       if (Array.isArray(usersArray)) {
         setOnlineUsersList(usersArray);
@@ -305,27 +330,54 @@ function ChatRoom({ username, onLogout }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Auto scroll - improved: when messageList changes, scroll but avoid interrupting user if they scrolled up
-  useEffect(() => {
-    // If user is near bottom, auto-scroll. Otherwise leave their position.
-    const container = messagesContainerRef.current;
-    if (!container) return;
+  // --- SCROLL HANDLER (Load More Logic) ---
+  const handleScroll = (e) => {
+      const { scrollTop, scrollHeight } = e.target;
+      
+      // Check if scrolled to top, not loading, and has more to load
+      if (scrollTop === 0 && !isLoadingMore && hasMoreMessages && !loadingHistory && messageList.length > 0) {
+          setIsLoadingMore(true);
+          previousScrollHeightRef.current = scrollHeight; // Capture current height
+          
+          // Get the oldest message time
+          const oldestMsg = messageList[0];
+          
+          // Emit event to backend
+          if (socketRef.current) {
+             socketRef.current.emit("load_more_messages", { 
+                 lastMsgTime: oldestMsg.createdAt || oldestMsg.time 
+             });
+          }
+      }
+  };
 
-    const tolerance = 200; // px from bottom where we still auto-scroll
-    const atBottom = (container.scrollHeight - (container.scrollTop + container.clientHeight)) <= tolerance;
+  // --- RESTORE SCROLL POSITION AFTER LOADING MORE ---
+  useLayoutEffect(() => {
+      if (isLoadingMore && previousScrollHeightRef.current > 0) {
+          const container = messagesContainerRef.current;
+          if (container) {
+              const newScrollHeight = container.scrollHeight;
+              const scrollDiff = newScrollHeight - previousScrollHeightRef.current;
+              
+              // Jump scroll position to maintain visual continuity
+              container.scrollTop = scrollDiff;
+              
+              // Reset
+              previousScrollHeightRef.current = 0;
+              setIsLoadingMore(false);
+          }
+      }
+  }, [messageList, isLoadingMore]);
 
-    if (atBottom) {
-      // smooth scroll
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-    }
-  }, [messageList]);
 
-  // Auto scroll when images load - handler will call scrollIntoView on messagesEndRef
+  // Auto scroll when images load
   const handleImageLoad = () => {
-    // small timeout to ensure layout settled
-    setTimeout(() => {
-      try { messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); } catch (e) {}
-    }, 80);
+    // Only auto-scroll if we are NOT loading history
+    if (!isLoadingMore && !loadingHistory) {
+         setTimeout(() => {
+            try { messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); } catch (e) {}
+         }, 80);
+    }
   };
 
   // Typing debounce
@@ -385,18 +437,15 @@ function ChatRoom({ username, onLogout }) {
   // Helper to update message images after upload
   const replaceMessageImages = (id, images) => {
     setMessageList((prev) => prev.map((m) => m.id === id ? { ...m, images, _localPreview: false, loading: false } : m));
-    // remove pending map entry if exists
     if (pendingRef.current.has(id)) pendingRef.current.delete(id);
   };
 
-  // Upload images to backend, then create/send message with image metadata
+  // Upload images
   const handleFilesSelected = async (e) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
-    // limit to 3 images
     const limited = files.slice(0, 3);
 
-    // --- NEW BEHAVIOR: create optimistic local preview message immediately ---
     const tempId = generateId();
     const localPreviews = limited.map((f) => ({ url: URL.createObjectURL(f), name: f.name, local: true }));
 
@@ -414,11 +463,10 @@ function ChatRoom({ username, onLogout }) {
         message: replyingTo.message
       } : null,
       images: localPreviews,
-      _localPreview: true, // flag to know these are local previews
-      loading: true // show loader overlay
+      _localPreview: true,
+      loading: true
     };
 
-    // add to pending map & ui so user sees a placeholder message in chat
     pendingRef.current.set(tempId, optimisticMsg);
     setMessageList((prev) => {
       const map = new Map();
@@ -427,11 +475,9 @@ function ChatRoom({ username, onLogout }) {
       return Array.from(map.values());
     });
 
-    // ensure scroll to bottom after optimistic add
     setTimeout(() => { try { messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); } catch (e) {} }, 80);
 
-    // now start actual upload
-    const SOCKET_URL = "https://socketio-testing-chatbox.onrender.com"; // same backend
+    const SOCKET_URL = "https://socketio-testing-chatbox.onrender.com"; 
     const form = new FormData();
     limited.forEach((f) => form.append("images", f));
 
@@ -444,7 +490,6 @@ function ChatRoom({ username, onLogout }) {
       const data = await res.json();
       if (!data.ok) {
         toast.error("Upload failed");
-        // cleanup optimistic previews
         setMessageList((prev) => prev.filter((m) => m.id !== tempId));
         pendingRef.current.delete(tempId);
         setIsUploading(false);
@@ -452,10 +497,8 @@ function ChatRoom({ username, onLogout }) {
       }
       const images = data.images || [];
 
-      // replace optimistic preview message with uploaded image URLs
       replaceMessageImages(tempId, images);
 
-      // send the message to socket (so server & others get it)
       const msgData = {
         id: tempId,
         message: "",
@@ -469,52 +512,43 @@ function ChatRoom({ username, onLogout }) {
           displayName: replyingTo.displayName,
           message: replyingTo.message
         } : null,
-        images: images // array of {url, public_id, width, height, format}
+        images: images 
       };
 
-      // optimistic entry already present; emit so server stores and broadcasts
       socketRef.current?.emit("send_message", msgData, (ack) => {
         if (ack && ack.id) pendingRef.current.delete(ack.id);
       });
 
-      // scroll
       setTimeout(() => { try { messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); } catch (e) {} }, 80);
 
     } catch (err) {
       console.error("image upload error:", err);
       toast.error("Image upload failed");
-      // cleanup optimistic previews
       setMessageList((prev) => prev.filter((m) => m.id !== tempId));
       pendingRef.current.delete(tempId);
     } finally {
-      // reset input so same file can be selected again
       e.target.value = "";
       setReplyingTo(null);
       setIsUploading(false);
-
-      // revoke local object URLs to avoid memory leak
       localPreviews.forEach(p => { try { URL.revokeObjectURL(p.url); } catch (e) {} });
     }
   };
 
-  // --- HANDLE REACTION ---
   const handleReaction = (msgId, emoji) => {
     if (!socketRef.current) return;
     socketRef.current.emit("message_reaction", { messageId: msgId, emoji });
     setActiveReactionId(null);
-    setSelectedMsgId(null); // Close selection after reacting
+    setSelectedMsgId(null);
   };
 
-  // --- INIT REPLY ---
   const initReply = (msg) => {
     setReplyingTo(msg);
     inputRef.current?.focus();
-    setSelectedMsgId(null); // Close selection after clicking reply
+    setSelectedMsgId(null);
   };
 
-  // --- Toggle Message Selection (Click to show buttons) ---
   const handleMessageClick = (e, msgId) => {
-    e.stopPropagation(); // Stop click from hitting the background
+    e.stopPropagation();
     setSelectedMsgId(prev => prev === msgId ? null : msgId);
     if (activeReactionId && activeReactionId !== msgId) {
       setActiveReactionId(null);
@@ -522,8 +556,6 @@ function ChatRoom({ username, onLogout }) {
   };
 
   const typingArr = Object.values(typingUsers);
-
-  // Counts
   const totalUsersCount = onlineUsersList.length;
   const otherUsersCount = Math.max(0, totalUsersCount - 1);
 
@@ -532,7 +564,7 @@ function ChatRoom({ username, onLogout }) {
       <StyleSheet />
       <Toaster />
 
-      {/* Chat loading overlay */}
+      {/* Initial Chat loading overlay */}
       {loadingHistory && (
         <div className="loading-overlay">
           <div className="loader-box">
@@ -542,7 +574,7 @@ function ChatRoom({ username, onLogout }) {
         </div>
       )}
 
-      {/* --- NEW: USER LIST MODAL --- */}
+      {/* USER LIST MODAL */}
       {showUserListModal && (
         <div className="modal-backdrop" onClick={() => setShowUserListModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
@@ -581,8 +613,6 @@ function ChatRoom({ username, onLogout }) {
         <div className="chat-header">
           <div>
             <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "var(--text-main)" }}>Public Lounge</h2>
-
-            {/* CLICKABLE STATUS AREA */}
             <div
               className="status-clickable"
               onClick={() => setShowUserListModal(true)}
@@ -607,7 +637,6 @@ function ChatRoom({ username, onLogout }) {
               )}
             </button>
 
-            {/* USER AVATAR & DROPDOWN */}
             <div style={{ position: 'relative' }}>
               <img
                 src={`https://api.dicebear.com/7.x/notionists/svg?seed=${username}&backgroundColor=b6e3f4,c0aede,d1d4f9`}
@@ -633,12 +662,20 @@ function ChatRoom({ username, onLogout }) {
         <div
           className="messages-area"
           ref={messagesContainerRef}
+          onScroll={handleScroll}
           onClick={() => {
             setShowMenu(false);
             setActiveReactionId(null);
             setSelectedMsgId(null);
           }}
         >
+          {/* LOAD MORE SPINNER */}
+          {isLoadingMore && (
+              <div style={{ display: 'flex', justifyContent: 'center', padding: '10px 0' }}>
+                  <div className="spinner small" style={{ borderColor: 'var(--text-sub)', borderTopColor: 'var(--primary)' }}></div>
+              </div>
+          )}
+
           {messageList.length === 0 && !loadingHistory && (
             <div style={{ textAlign: "center", marginTop: 40, color: "var(--text-sub)", fontSize: 14 }}>
               Welcome, {username}! Say Hi! 👋
@@ -651,8 +688,6 @@ function ChatRoom({ username, onLogout }) {
             const avatarUrl = msg.avatar || `https://api.dicebear.com/7.x/notionists/svg?seed=${seed}&backgroundColor=b6e3f4,c0aede,d1d4f9`;
             const isPending = pendingRef.current.has(msg.id) || msg._localPreview;
             const showPicker = activeReactionId === msg.id;
-
-            // Logic to show buttons (only if this specific message ID is selected)
             const showActions = selectedMsgId === msg.id;
 
             return (
@@ -682,10 +717,8 @@ function ChatRoom({ username, onLogout }) {
                     {isMine ? "You" : (msg.displayName || "Anon")}
                   </div>
 
-                  {/* --- UPDATED: RENDER WITH LINKS --- */}
                   <div>{renderMessageWithLinks(msg.message)}</div>
 
-                  {/* --- NEW: render images if present --- */}
                   {msg.images && msg.images.length > 0 && (
                     <div className="images-grid" onClick={(e) => e.stopPropagation()}>
                       {msg.images.map((img, idx) => (
@@ -697,8 +730,6 @@ function ChatRoom({ username, onLogout }) {
                             onClick={() => window.open(img.url, "_blank")}
                             onLoad={handleImageLoad}
                           />
-
-                          {/* NEW: show small overlay spinner on each local preview image until it's uploaded */}
                           {(msg._localPreview || img.local || msg.loading) && (
                             <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(2,6,23,0.45)', borderRadius: 10 }}>
                               <div className="spinner" style={{ width: 22, height: 22, borderWidth: 3 }} />
@@ -773,7 +804,6 @@ function ChatRoom({ username, onLogout }) {
           )}
 
           <div className="input-area">
-            {/* Hidden file input */}
             <input
               type="file"
               accept="image/*"
@@ -783,7 +813,6 @@ function ChatRoom({ username, onLogout }) {
               onChange={handleFilesSelected}
             />
 
-            {/* Camera / Attachment button */}
             <button className="icon-btn attach-btn" onClick={handleAttachClick} title="Attach images">
               {isUploading ? (
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>

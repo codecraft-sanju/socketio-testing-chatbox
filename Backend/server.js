@@ -40,6 +40,9 @@ const messageSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
+// Indexing createdAt for faster pagination queries
+messageSchema.index({ createdAt: -1 });
+
 const Message = mongoose.model("Message", messageSchema);
 
 // --- SERVER SETUP ---
@@ -121,14 +124,37 @@ io.on("connection", async (socket) => {
 
   socket.data.displayName = `User-${socket.id.slice(0, 5)}`;
 
-  // --- 1. LOAD HISTORY FROM DB (UPDATED LIMIT: 30) ---
+  // --- 1. LOAD INITIAL HISTORY (Latest 30) ---
   try {
-    // UPDATED: Changed limit(50) to limit(30) for faster loading
-    const history = await Message.find().sort({ createdAt: -1 }).limit(30);
+    const history = await Message.find()
+      .sort({ createdAt: -1 })
+      .limit(30);
     socket.emit("history", history.reverse());
   } catch (err) {
     console.error("Error loading history:", err);
   }
+
+  // --- 2. LOAD MORE MESSAGES (Pagination / Infinite Scroll) ---
+  // Client will send the 'createdAt' date of the oldest message they have
+  socket.on("load_more_messages", async ({ lastMsgTime }) => {
+    try {
+      if (!lastMsgTime) return;
+
+      // Find messages OLDER (<) than the last message time
+      const olderMessages = await Message.find({
+        createdAt: { $lt: new Date(lastMsgTime) }
+      })
+      .sort({ createdAt: -1 }) // Get newest of the old ones first
+      .limit(30); // Load next batch of 30
+
+      // Send back only to the requesting user
+      // We send them in reverse order (Oldest -> Newest) so they append correctly at top
+      socket.emit("more_messages_loaded", olderMessages.reverse());
+
+    } catch (e) {
+      console.error("Error loading more messages:", e);
+    }
+  });
 
   // Initial Broadcast
   broadcastOnlineUsers();
@@ -189,7 +215,7 @@ io.on("connection", async (socket) => {
     }
   });
 
-  // --- SEND MESSAGE (UPDATED & OPTIMIZED) ---
+  // --- SEND MESSAGE ---
   socket.on("send_message", async (data, ack) => {
     try {
       if (!data || (!data.message && !(Array.isArray(data.images) && data.images.length > 0))) {
@@ -222,7 +248,7 @@ io.on("connection", async (socket) => {
       if (ack) ack({ ok: true, id: msgData.id });
 
     } catch (e) {
-      
+      // ✅ Handle Duplicate ID Error (MongoDB Code 11000)
       if (e.code === 11000) {
         if (ack) ack({ ok: true, id: data.id });
       } else {
