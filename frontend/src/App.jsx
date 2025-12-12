@@ -382,6 +382,13 @@ function ChatRoom({ username, onLogout }) {
     fileInputRef.current?.click();
   };
 
+  // Helper to update message images after upload
+  const replaceMessageImages = (id, images) => {
+    setMessageList((prev) => prev.map((m) => m.id === id ? { ...m, images, _localPreview: false, loading: false } : m));
+    // remove pending map entry if exists
+    if (pendingRef.current.has(id)) pendingRef.current.delete(id);
+  };
+
   // Upload images to backend, then create/send message with image metadata
   const handleFilesSelected = async (e) => {
     const files = Array.from(e.target.files || []);
@@ -389,6 +396,41 @@ function ChatRoom({ username, onLogout }) {
     // limit to 3 images
     const limited = files.slice(0, 3);
 
+    // --- NEW BEHAVIOR: create optimistic local preview message immediately ---
+    const tempId = generateId();
+    const localPreviews = limited.map((f) => ({ url: URL.createObjectURL(f), name: f.name, local: true }));
+
+    const optimisticMsg = {
+      id: tempId,
+      message: "",
+      time: new Date().toISOString(),
+      socketId: socketRef.current?.id,
+      displayName: clientDisplayName.current,
+      avatar: `https://api.dicebear.com/7.x/notionists/svg?seed=${clientDisplayName.current}&backgroundColor=b6e3f4,c0aede,d1d4f9`,
+      reactions: {},
+      replyTo: replyingTo ? {
+        id: replyingTo.id,
+        displayName: replyingTo.displayName,
+        message: replyingTo.message
+      } : null,
+      images: localPreviews,
+      _localPreview: true, // flag to know these are local previews
+      loading: true // show loader overlay
+    };
+
+    // add to pending map & ui so user sees a placeholder message in chat
+    pendingRef.current.set(tempId, optimisticMsg);
+    setMessageList((prev) => {
+      const map = new Map();
+      prev.forEach((m) => map.set(m.id, m));
+      map.set(tempId, optimisticMsg);
+      return Array.from(map.values());
+    });
+
+    // ensure scroll to bottom after optimistic add
+    setTimeout(() => { try { messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); } catch (e) {} }, 80);
+
+    // now start actual upload
     const SOCKET_URL = "https://socketio-testing-chatbox.onrender.com"; // same backend
     const form = new FormData();
     limited.forEach((f) => form.append("images", f));
@@ -402,16 +444,21 @@ function ChatRoom({ username, onLogout }) {
       const data = await res.json();
       if (!data.ok) {
         toast.error("Upload failed");
+        // cleanup optimistic previews
+        setMessageList((prev) => prev.filter((m) => m.id !== tempId));
+        pendingRef.current.delete(tempId);
         setIsUploading(false);
         return;
       }
       const images = data.images || [];
 
-      // create msg with images
-      const id = generateId();
+      // replace optimistic preview message with uploaded image URLs
+      replaceMessageImages(tempId, images);
+
+      // send the message to socket (so server & others get it)
       const msgData = {
-        id,
-        message: "", // optional caption currently empty
+        id: tempId,
+        message: "",
         time: new Date().toISOString(),
         socketId: socketRef.current?.id,
         displayName: clientDisplayName.current,
@@ -425,30 +472,28 @@ function ChatRoom({ username, onLogout }) {
         images: images // array of {url, public_id, width, height, format}
       };
 
-      // optimistic UI
-      pendingRef.current.set(id, msgData);
-      setMessageList((prev) => {
-        const map = new Map();
-        prev.forEach((m) => map.set(m.id, m));
-        map.set(id, msgData);
-        return Array.from(map.values());
-      });
-
+      // optimistic entry already present; emit so server stores and broadcasts
       socketRef.current?.emit("send_message", msgData, (ack) => {
         if (ack && ack.id) pendingRef.current.delete(ack.id);
       });
 
-      // ensure scroll to bottom after optimistic add
+      // scroll
       setTimeout(() => { try { messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); } catch (e) {} }, 80);
 
     } catch (err) {
       console.error("image upload error:", err);
       toast.error("Image upload failed");
+      // cleanup optimistic previews
+      setMessageList((prev) => prev.filter((m) => m.id !== tempId));
+      pendingRef.current.delete(tempId);
     } finally {
       // reset input so same file can be selected again
       e.target.value = "";
       setReplyingTo(null);
       setIsUploading(false);
+
+      // revoke local object URLs to avoid memory leak
+      localPreviews.forEach(p => { try { URL.revokeObjectURL(p.url); } catch (e) {} });
     }
   };
 
@@ -604,7 +649,7 @@ function ChatRoom({ username, onLogout }) {
             const isMine = msg.socketId === socketRef.current?.id || msg.displayName === username;
             const seed = msg.displayName || msg.socketId;
             const avatarUrl = msg.avatar || `https://api.dicebear.com/7.x/notionists/svg?seed=${seed}&backgroundColor=b6e3f4,c0aede,d1d4f9`;
-            const isPending = pendingRef.current.has(msg.id);
+            const isPending = pendingRef.current.has(msg.id) || msg._localPreview;
             const showPicker = activeReactionId === msg.id;
 
             // Logic to show buttons (only if this specific message ID is selected)
@@ -644,14 +689,22 @@ function ChatRoom({ username, onLogout }) {
                   {msg.images && msg.images.length > 0 && (
                     <div className="images-grid" onClick={(e) => e.stopPropagation()}>
                       {msg.images.map((img, idx) => (
-                        <img
-                          key={idx}
-                          src={img.url}
-                          alt={`img-${idx}`}
-                          className="inline-image"
-                          onClick={() => window.open(img.url, "_blank")}
-                          onLoad={handleImageLoad}
-                        />
+                        <div key={idx} style={{ position: 'relative' }}>
+                          <img
+                            src={img.url}
+                            alt={`img-${idx}`}
+                            className="inline-image"
+                            onClick={() => window.open(img.url, "_blank")}
+                            onLoad={handleImageLoad}
+                          />
+
+                          {/* NEW: show small overlay spinner on each local preview image until it's uploaded */}
+                          {(msg._localPreview || img.local || msg.loading) && (
+                            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(2,6,23,0.45)', borderRadius: 10 }}>
+                              <div className="spinner" style={{ width: 22, height: 22, borderWidth: 3 }} />
+                            </div>
+                          )}
+                        </div>
                       ))}
                     </div>
                   )}
