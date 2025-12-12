@@ -28,7 +28,7 @@ mongoose.connect(process.env.MONGO_URI || "mongodb+srv://sanjaychoudhary01818_db
 
 // --- MONGOOSE SCHEMA ---
 const messageSchema = new mongoose.Schema({
-  id: { type: String, unique: true }, // unique: true duplicate rokega
+  id: { type: String, unique: true }, 
   message: String,
   time: String,
   socketId: String,
@@ -36,7 +36,7 @@ const messageSchema = new mongoose.Schema({
   avatar: String,
   replyTo: { type: Object, default: null },
   reactions: { type: Object, default: {} },
-  images: { type: Array, default: [] }, // NEW: store image metadata array
+  images: { type: Array, default: [] }, 
   createdAt: { type: Date, default: Date.now }
 });
 
@@ -67,16 +67,13 @@ app.get("/", (req, res) => {
   res.send({ status: "Active", clients: io.engine.clientsCount, db: mongoose.connection.readyState === 1 ? "Connected" : "Disconnected" });
 });
 
-// --- IMAGE UPLOAD ENDPOINT ---
-// Accepts multipart/form-data field "images" (one or many). Limits to 3 images per request.
-// Returns: { ok: true, images: [ { url, public_id, width, height } ] }
 app.post("/upload-image", upload.array("images", 6), async (req, res) => {
   try {
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({ ok: false, error: "no_files" });
     }
 
-    // Only keep last first 3 images (user asked max 3)
+    // Only keep first 3 images (user asked max 3)
     const files = req.files.slice(0, 3);
 
     const uploadPromises = files.map(file => new Promise((resolve, reject) => {
@@ -124,9 +121,10 @@ io.on("connection", async (socket) => {
 
   socket.data.displayName = `User-${socket.id.slice(0, 5)}`;
 
-  // --- 1. LOAD HISTORY FROM DB ---
+  // --- 1. LOAD HISTORY FROM DB (UPDATED LIMIT: 30) ---
   try {
-    const history = await Message.find().sort({ createdAt: -1 }).limit(50);
+    // UPDATED: Changed limit(50) to limit(30) for faster loading
+    const history = await Message.find().sort({ createdAt: -1 }).limit(30);
     socket.emit("history", history.reverse());
   } catch (err) {
     console.error("Error loading history:", err);
@@ -224,7 +222,7 @@ io.on("connection", async (socket) => {
       if (ack) ack({ ok: true, id: msgData.id });
 
     } catch (e) {
-      // ✅ Handle Duplicate ID Error (MongoDB Code 11000)
+      
       if (e.code === 11000) {
         if (ack) ack({ ok: true, id: data.id });
       } else {
