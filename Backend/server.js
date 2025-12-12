@@ -11,26 +11,24 @@ const cloudinary = require("cloudinary").v2;
 const app = express();
 app.use(express.json());
 
-
+// --- CLOUDINARY CONFIG ---
 cloudinary.config({
   cloud_name: "dj7mqj1nv",
   api_key: "117674112654154",
   api_secret: "oldxiBt3QHm3RwIoCeGhfpWLdMk",
-  secure: true,
 });
 
+// Multer memory storage for direct streaming to Cloudinary
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB limit per file
+
 // --- MONGODB CONNECTION ---
-mongoose.connect(
- 
-    "mongodb+srv://sanjaychoudhary01818_db_user:sanju098@cluster0.otatmnk.mongodb.net/?appName=Cluster0"
-  
-)
+mongoose.connect(process.env.MONGO_URI || "mongodb+srv://sanjaychoudhary01818_db_user:sanju098@cluster0.otatmnk.mongodb.net/?appName=Cluster0")
   .then(() => console.log("✅ MongoDB Connected"))
   .catch((err) => console.error("❌ MongoDB Error:", err));
 
-// --- MONGOOSE SCHEMAS ---
+// --- MONGOOSE SCHEMA ---
 const messageSchema = new mongoose.Schema({
-  id: { type: String, unique: true },
+  id: { type: String, unique: true }, // unique: true duplicate rokega
   message: String,
   time: String,
   socketId: String,
@@ -38,19 +36,11 @@ const messageSchema = new mongoose.Schema({
   avatar: String,
   replyTo: { type: Object, default: null },
   reactions: { type: Object, default: {} },
-  attachments: { type: Array, default: [] }, 
-  createdAt: { type: Date, default: Date.now }
-});
-
-const imageTrackSchema = new mongoose.Schema({
-  socketId: String,
-  public_id: String,
-  url: String,
+  images: { type: Array, default: [] }, // NEW: store image metadata array
   createdAt: { type: Date, default: Date.now }
 });
 
 const Message = mongoose.model("Message", messageSchema);
-const ImageTrack = mongoose.model("ImageTrack", imageTrackSchema);
 
 // --- SERVER SETUP ---
 const CLIENT_URL = "https://socketio-testing-chatbox.vercel.app";
@@ -77,75 +67,41 @@ app.get("/", (req, res) => {
   res.send({ status: "Active", clients: io.engine.clientsCount, db: mongoose.connection.readyState === 1 ? "Connected" : "Disconnected" });
 });
 
-// ---------- MULTER (for parsing multipart form-data) ----------
-const storage = multer.memoryStorage();
-const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB limit per file
-
-// ---------- UPLOAD ENDPOINT ----------
-/**
- * POST /upload
- * form-data field: images (one or multiple)
- * header should include optional socketId (to track last 3 per user)
- */
-app.post("/upload", upload.array("images", 6), async (req, res) => {
+// --- IMAGE UPLOAD ENDPOINT ---
+// Accepts multipart/form-data field "images" (one or many). Limits to 3 images per request.
+// Returns: { ok: true, images: [ { url, public_id, width, height } ] }
+app.post("/upload-image", upload.array("images", 6), async (req, res) => {
   try {
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({ ok: false, error: "no_files" });
     }
 
-    const socketId = req.headers["x-socket-id"] || req.body.socketId || null;
-    const uploaded = [];
+    // Only keep last first 3 images (user asked max 3)
+    const files = req.files.slice(0, 3);
 
-    // Helper: upload buffer to cloudinary via upload_stream
-    const uploadOne = (buffer, folder = "chat_images") => {
-      return new Promise((resolve, reject) => {
-        const uploadStream = cloudinary.uploader.upload_stream(
-          { folder, resource_type: "image" },
-          (error, result) => {
-            if (error) return reject(error);
-            resolve(result);
-          }
-        );
-        streamifier.createReadStream(buffer).pipe(uploadStream);
-      });
-    };
-
-    for (const file of req.files) {
-      // upload to Cloudinary
-      const result = await uploadOne(file.buffer);
-      if (result && result.secure_url) {
-        uploaded.push({ url: result.secure_url, public_id: result.public_id });
-        // Track for deletion policy
-        if (socketId) {
-          await ImageTrack.create({
-            socketId,
+    const uploadPromises = files.map(file => new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        { folder: process.env.CLOUDINARY_FOLDER || "chat_images", resource_type: "image" },
+        (err, result) => {
+          if (err) return reject(err);
+          resolve({
+            url: result.secure_url,
             public_id: result.public_id,
-            url: result.secure_url
+            width: result.width,
+            height: result.height,
+            format: result.format,
           });
         }
-      }
-    }
+      );
+      streamifier.createReadStream(file.buffer).pipe(uploadStream);
+    }));
 
-    // Enforce last-3 images per socketId: delete older ones beyond 3
-    if (socketId) {
-      const imgs = await ImageTrack.find({ socketId }).sort({ createdAt: -1 });
-      if (imgs.length > 3) {
-        const toRemove = imgs.slice(3); // oldest ones beyond latest 3
-        for (const r of toRemove) {
-          try {
-            await cloudinary.uploader.destroy(r.public_id, { resource_type: "image" });
-          } catch (err) {
-            console.warn("Cloudinary delete failed for", r.public_id, err.message || err);
-          }
-          await ImageTrack.deleteOne({ _id: r._id }).catch(() => {});
-        }
-      }
-    }
+    const uploaded = await Promise.all(uploadPromises);
 
-    return res.json({ ok: true, uploaded });
-  } catch (err) {
-    console.error("Upload error:", err);
-    return res.status(500).json({ ok: false, error: "server_error", details: err.message });
+    return res.json({ ok: true, images: uploaded });
+  } catch (e) {
+    console.error("upload-image error:", e);
+    return res.status(500).json({ ok: false, error: "upload_failed" });
   }
 });
 
@@ -238,7 +194,7 @@ io.on("connection", async (socket) => {
   // --- SEND MESSAGE (UPDATED & OPTIMIZED) ---
   socket.on("send_message", async (data, ack) => {
     try {
-      if (!data || (!data.message && (!data.attachments || data.attachments.length === 0))) {
+      if (!data || (!data.message && !(Array.isArray(data.images) && data.images.length > 0))) {
         if (ack) ack({ ok: false, error: "invalid_payload" });
         return;
       }
@@ -254,7 +210,7 @@ io.on("connection", async (socket) => {
         avatar: data.avatar || null,
         reactions: data.reactions || {},
         replyTo: data.replyTo || null,
-        attachments: data.attachments || []
+        images: Array.isArray(data.images) ? data.images : []
       };
 
       // 1. Try to Save to DB directly
@@ -263,12 +219,12 @@ io.on("connection", async (socket) => {
 
       // 2. If saved successfully, Broadcast to everyone
       io.emit("receive_message", msgData);
-
+      
       // 3. Send success acknowledgement to sender
       if (ack) ack({ ok: true, id: msgData.id });
 
     } catch (e) {
-      // Handle Duplicate ID Error (MongoDB Code 11000)
+      // ✅ Handle Duplicate ID Error (MongoDB Code 11000)
       if (e.code === 11000) {
         if (ack) ack({ ok: true, id: data.id });
       } else {
