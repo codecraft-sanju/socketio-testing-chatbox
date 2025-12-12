@@ -17,15 +17,12 @@ function formatTime(dateInput) {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-// --- MAIN APP COMPONENT (Auth & Theme Handler) ---
+// --- MAIN APP COMPONENT (Auth Handler) ---
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [username, setUsername] = useState("");
   const [inputName, setInputName] = useState("");
   const [shakeError, setShakeError] = useState(false); 
-  
-  // 👇 THEME STATE
-  const [theme, setTheme] = useState(() => localStorage.getItem("chat_app_theme") || "light");
 
   // 1. Check LocalStorage on Load
   useEffect(() => {
@@ -37,16 +34,6 @@ export default function App() {
       setIsLoggedIn(true);
     }
   }, []);
-
-  // Apply Theme to HTML Body
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
-    localStorage.setItem("chat_app_theme", theme);
-  }, [theme]);
-
-  const toggleTheme = () => {
-    setTheme((prev) => (prev === "light" ? "dark" : "light"));
-  };
 
   // 2. Handle Signup
   const handleLogin = () => {
@@ -114,31 +101,24 @@ export default function App() {
               Join Chat Room 
               <svg style={{marginLeft:8}} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
             </button>
-            
-            {/* Theme Toggle on Login Screen too */}
-            <div style={{marginTop: 20}}>
-                <button onClick={toggleTheme} className="theme-toggle-login">
-                    {theme === 'light' ? ' Dark Mode' : ' Light Mode'}
-                </button>
-            </div>
           </div>
         </div>
       </div>
     );
   }
 
-  return <ChatRoom username={username} onLogout={handleLogout} theme={theme} toggleTheme={toggleTheme} />;
+  return <ChatRoom username={username} onLogout={handleLogout} />;
 }
 
 // --- CHAT ROOM COMPONENT ---
-function ChatRoom({ username, onLogout, theme, toggleTheme }) {
+function ChatRoom({ username, onLogout }) {
   // STATE
   const [message, setMessage] = useState("");
   const [messageList, setMessageList] = useState([]);
   const [connected, setConnected] = useState(false);
   const [typingUsers, setTypingUsers] = useState({});
   const [totalUsers, setTotalUsers] = useState(1);
-  const [showMenu, setShowMenu] = useState(false); // Changed name to showMenu for clarity
+  const [showMenu, setShowMenu] = useState(false); 
   const [isMuted, setIsMuted] = useState(() => localStorage.getItem("chat_muted") === "true");
   
   // Track active reaction picker (Message ID)
@@ -389,15 +369,6 @@ function ChatRoom({ username, onLogout, theme, toggleTheme }) {
                 {/* 👇 DROPDOWN MENU */}
                 {showMenu && (
                   <div className="dropdown-menu">
-                      <div className="menu-item" onClick={() => { toggleTheme(); }}>
-                          <span style={{fontSize: 16}}>
-                            {theme === 'light' ? '' : ''}
-                          </span>
-                          <span>{theme === 'light' ? 'Dark Mode' : 'Light Mode'}</span>
-                      </div>
-                      
-                      <div className="menu-divider"></div>
-
                       <div className="menu-item danger" onClick={onLogout}>
                           <span style={{fontSize: 16}}>↪</span>
                           <span>Logout</span>
@@ -528,30 +499,11 @@ function ChatRoom({ username, onLogout, theme, toggleTheme }) {
   );
 }
 
-// --- STYLES (UPDATED FOR DARK MODE) ---
+// --- STYLES (STRICTLY DARK MODE) ---
 const StyleSheet = () => (
   <style>{`
-    /* --- CSS VARIABLES FOR THEMES --- */
+    /* --- CSS VARIABLES FOR DARK MODE ONLY --- */
     :root {
-      /* LIGHT MODE (Default) */
-      --bg: #f3f4f6;
-      --chat-bg: #ffffff;
-      --primary: #4f46e5;
-      --primary-dark: #4338ca;
-      --primary-light: #e0e7ff;
-      --text-main: #1f2937;
-      --text-sub: #6b7280;
-      --mine-bubble: #4f46e5;
-      --other-bubble: #f3f4f6;
-      --border: #e5e7eb;
-      --input-bg: #f9fafb;
-      --shadow-color: rgba(0,0,0,0.1);
-      --dropdown-bg: rgba(255, 255, 255, 0.95);
-      --dropdown-hover: #f3f4f6;
-    }
-
-    /* DARK MODE OVERRIDES */
-    [data-theme='dark'] {
       --bg: #0f172a;           /* Deep Slate Background */
       --chat-bg: #1e293b;      /* Slate-800 Chat Card */
       --primary: #6366f1;      /* Slightly brighter Indigo */
@@ -604,8 +556,6 @@ const StyleSheet = () => (
     .modern-btn { width: 100%; padding: 16px; border: none; border-radius: 16px; background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%); color: white; font-size: 16px; font-weight: 600; cursor: pointer; box-shadow: 0 10px 20px -5px rgba(79, 70, 229, 0.4); transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); display: flex; justify-content: center; align-items: center; }
     .modern-btn:hover { transform: translateY(-3px) scale(1.02); box-shadow: 0 15px 30px -5px rgba(79, 70, 229, 0.5); }
     .modern-btn:active { transform: translateY(-1px) scale(0.98); }
-    .theme-toggle-login { background: transparent; border: 1px solid var(--border); color: var(--text-sub); padding: 8px 16px; border-radius: 20px; cursor: pointer; font-size: 13px; font-weight: 600; transition: all 0.2s; }
-    .theme-toggle-login:hover { background: var(--input-bg); color: var(--text-main); border-color: var(--text-sub); }
     .shake-anim { animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both; }
     @keyframes shake { 10%, 90% { transform: translate3d(-1px, 0, 0); } 20%, 80% { transform: translate3d(2px, 0, 0); } 30%, 50%, 70% { transform: translate3d(-4px, 0, 0); } 40%, 60% { transform: translate3d(4px, 0, 0); } }
     @media (max-width: 600px) { .glass-card { margin: 20px; padding: 30px 20px; } .welcome-title { font-size: 24px; } }
