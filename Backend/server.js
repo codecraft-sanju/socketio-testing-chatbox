@@ -1,22 +1,36 @@
-// backend/server.js
 require("dotenv").config();
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const cors = require("cors");
 const mongoose = require("mongoose");
+const multer = require("multer");
+const streamifier = require("streamifier");
+const cloudinary = require("cloudinary").v2;
 
 const app = express();
 app.use(express.json());
 
+
+cloudinary.config({
+  cloud_name: "dj7mqj1nv",
+  api_key: "117674112654154",
+  api_secret: "oldxiBt3QHm3RwIoCeGhfpWLdMk",
+  secure: true,
+});
+
 // --- MONGODB CONNECTION ---
-mongoose.connect(process.env.MONGO_URI || "mongodb+srv://sanjaychoudhary01818_db_user:sanju098@cluster0.otatmnk.mongodb.net/?appName=Cluster0")
+mongoose.connect(
+ 
+    "mongodb+srv://sanjaychoudhary01818_db_user:sanju098@cluster0.otatmnk.mongodb.net/?appName=Cluster0"
+  
+)
   .then(() => console.log("✅ MongoDB Connected"))
   .catch((err) => console.error("❌ MongoDB Error:", err));
 
-// --- MONGOOSE SCHEMA ---
+// --- MONGOOSE SCHEMAS ---
 const messageSchema = new mongoose.Schema({
-  id: { type: String, unique: true }, // unique: true duplicate rokega
+  id: { type: String, unique: true },
   message: String,
   time: String,
   socketId: String,
@@ -24,10 +38,19 @@ const messageSchema = new mongoose.Schema({
   avatar: String,
   replyTo: { type: Object, default: null },
   reactions: { type: Object, default: {} },
+  attachments: { type: Array, default: [] }, 
+  createdAt: { type: Date, default: Date.now }
+});
+
+const imageTrackSchema = new mongoose.Schema({
+  socketId: String,
+  public_id: String,
+  url: String,
   createdAt: { type: Date, default: Date.now }
 });
 
 const Message = mongoose.model("Message", messageSchema);
+const ImageTrack = mongoose.model("ImageTrack", imageTrackSchema);
 
 // --- SERVER SETUP ---
 const CLIENT_URL = "https://socketio-testing-chatbox.vercel.app";
@@ -54,9 +77,80 @@ app.get("/", (req, res) => {
   res.send({ status: "Active", clients: io.engine.clientsCount, db: mongoose.connection.readyState === 1 ? "Connected" : "Disconnected" });
 });
 
+// ---------- MULTER (for parsing multipart form-data) ----------
+const storage = multer.memoryStorage();
+const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB limit per file
+
+// ---------- UPLOAD ENDPOINT ----------
+/**
+ * POST /upload
+ * form-data field: images (one or multiple)
+ * header should include optional socketId (to track last 3 per user)
+ */
+app.post("/upload", upload.array("images", 6), async (req, res) => {
+  try {
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ ok: false, error: "no_files" });
+    }
+
+    const socketId = req.headers["x-socket-id"] || req.body.socketId || null;
+    const uploaded = [];
+
+    // Helper: upload buffer to cloudinary via upload_stream
+    const uploadOne = (buffer, folder = "chat_images") => {
+      return new Promise((resolve, reject) => {
+        const uploadStream = cloudinary.uploader.upload_stream(
+          { folder, resource_type: "image" },
+          (error, result) => {
+            if (error) return reject(error);
+            resolve(result);
+          }
+        );
+        streamifier.createReadStream(buffer).pipe(uploadStream);
+      });
+    };
+
+    for (const file of req.files) {
+      // upload to Cloudinary
+      const result = await uploadOne(file.buffer);
+      if (result && result.secure_url) {
+        uploaded.push({ url: result.secure_url, public_id: result.public_id });
+        // Track for deletion policy
+        if (socketId) {
+          await ImageTrack.create({
+            socketId,
+            public_id: result.public_id,
+            url: result.secure_url
+          });
+        }
+      }
+    }
+
+    // Enforce last-3 images per socketId: delete older ones beyond 3
+    if (socketId) {
+      const imgs = await ImageTrack.find({ socketId }).sort({ createdAt: -1 });
+      if (imgs.length > 3) {
+        const toRemove = imgs.slice(3); // oldest ones beyond latest 3
+        for (const r of toRemove) {
+          try {
+            await cloudinary.uploader.destroy(r.public_id, { resource_type: "image" });
+          } catch (err) {
+            console.warn("Cloudinary delete failed for", r.public_id, err.message || err);
+          }
+          await ImageTrack.deleteOne({ _id: r._id }).catch(() => {});
+        }
+      }
+    }
+
+    return res.json({ ok: true, uploaded });
+  } catch (err) {
+    console.error("Upload error:", err);
+    return res.status(500).json({ ok: false, error: "server_error", details: err.message });
+  }
+});
+
 // STATE
 const connectedSockets = new Set();
-// ❌ REMOVED: const messageIds = new Set(); (Yeh memory leak kar raha tha)
 
 // --- FUNCTION: Broadcast Full User List ---
 async function broadcastOnlineUsers() {
@@ -78,7 +172,6 @@ io.on("connection", async (socket) => {
   try {
     const history = await Message.find().sort({ createdAt: -1 }).limit(50);
     socket.emit("history", history.reverse());
-    // ❌ REMOVED: messageIds.add logic here (Not needed anymore)
   } catch (err) {
     console.error("Error loading history:", err);
   }
@@ -145,7 +238,7 @@ io.on("connection", async (socket) => {
   // --- SEND MESSAGE (UPDATED & OPTIMIZED) ---
   socket.on("send_message", async (data, ack) => {
     try {
-      if (!data || !data.message) {
+      if (!data || (!data.message && (!data.attachments || data.attachments.length === 0))) {
         if (ack) ack({ ok: false, error: "invalid_payload" });
         return;
       }
@@ -154,13 +247,14 @@ io.on("connection", async (socket) => {
       // Message Object
       const msgData = {
         id: data.id,
-        message: data.message,
+        message: data.message || "",
         time: data.time || new Date().toISOString(),
         socketId: data.socketId || socket.id,
         displayName: data.displayName || socket.data.displayName || `User-${socket.id.slice(0, 5)}`,
         avatar: data.avatar || null,
-        reactions: {},
-        replyTo: data.replyTo || null
+        reactions: data.reactions || {},
+        replyTo: data.replyTo || null,
+        attachments: data.attachments || []
       };
 
       // 1. Try to Save to DB directly
@@ -169,15 +263,13 @@ io.on("connection", async (socket) => {
 
       // 2. If saved successfully, Broadcast to everyone
       io.emit("receive_message", msgData);
-      
+
       // 3. Send success acknowledgement to sender
       if (ack) ack({ ok: true, id: msgData.id });
 
     } catch (e) {
-      // ✅ Handle Duplicate ID Error (MongoDB Code 11000)
+      // Handle Duplicate ID Error (MongoDB Code 11000)
       if (e.code === 11000) {
-        // Message already exists. Ignore it but tell client it's OK.
-        // This handles the "Set" logic without using RAM.
         if (ack) ack({ ok: true, id: data.id });
       } else {
         console.error("send_message error:", e);
