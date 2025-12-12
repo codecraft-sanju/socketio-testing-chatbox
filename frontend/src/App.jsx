@@ -731,9 +731,9 @@ function ChatRoom({ username, onLogout }) {
             />
 
             {/* Camera / Attachment button */}
-            <button className="icon-btn attach-btn" onClick={handleAttachClick} title="Attach images">
+            <button className="icon-btn attach-btn" onClick={handleAttachClick} title="Attach images" aria-label="Attach images">
               {isUploading ? (
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "100%", height: "100%" }}>
                   <div className="spinner small" />
                 </div>
               ) : (
@@ -835,6 +835,45 @@ const StyleSheet = () => (
     .spinner.small { width: 16px; height: 16px; border-width: 2px; }
     .spinner.large { width: 36px; height: 36px; border-width: 3px; }
     @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Make attach button container relative so spinner centers correctly on all devices */
+    .attach-btn {
+      width:46px;
+      height:46px;
+      border-radius:50%;
+      background: transparent;
+      border:1px solid var(--border);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      cursor:pointer;
+      position: relative; /* <-- important for centering spinner */
+      overflow: visible;
+    }
+
+    /* ensure spinner inside attach button is centered & visible on any screen */
+    .attach-btn .spinner {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 6;
+      border: 2px solid rgba(255,255,255,0.08);
+      border-top-color: var(--primary);
+      background: transparent;
+    }
+    .attach-btn .spinner.small {
+      width: 18px;
+      height: 18px;
+      border-width: 2px;
+    }
+
+    /* increase tappable area on small screens and keep spinner visible */
+    @media (max-width: 600px) {
+      .attach-btn { width:48px; height:48px; }
+      .attach-btn .spinner.small { width: 18px; height: 18px; }
+      .spinner.large { width: 44px; height: 44px; }
+    }
 
     /* pending badge overlay in bubble */
     .pending-badge {
@@ -993,10 +1032,6 @@ const StyleSheet = () => (
 
     .send-btn { background:var(--primary); color:white; border:none; width:46px; height:46px; border-radius:50%; cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink: 0; margin-bottom: 2px; }
     .send-btn:active { transform:scale(.95); }
-
-    /* Attach button style */
-    .attach-btn { width:46px; height:46px; border-radius:50%; background: transparent; border:1px solid var(--border); display:flex; align-items:center; justify-content:center; cursor:pointer; }
-    .attach-btn:hover { background: rgba(255,255,255,0.02); }
 
     /* Inline images grid */
     .images-grid { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
