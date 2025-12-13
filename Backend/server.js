@@ -241,7 +241,20 @@ io.on("connection", async (socket) => {
       const newMsg = new Message(msgData);
       await newMsg.save();
 
+      // --- AUTO-CLEAR LOGIC (Performance Optimization) ---
+      // Check if message count reached 200. If so, clear DB.
+      const count = await Message.countDocuments();
+      if (count >= 200) {
+        await Message.deleteMany({});
+        console.log("⚠️ Database reached 200 messages. Cleared history for performance.");
+        
+        // Optional: Tell frontend to clear screen if you want, or just let them see empty history on refresh
+        io.emit("history_cleared"); 
+      }
+      // --------------------------------------------------
+
       // 2. If saved successfully, Broadcast to everyone
+      // (Even if we deleted the DB, we still broadcast this latest message so the current session flows smoothly)
       io.emit("receive_message", msgData);
       
       // 3. Send success acknowledgement to sender

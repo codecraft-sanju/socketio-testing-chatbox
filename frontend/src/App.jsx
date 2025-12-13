@@ -283,6 +283,30 @@ function ChatRoom({ username, onLogout }) {
         // Note: isLoadingMore is set to false in the useLayoutEffect below after scroll adjustment
     });
 
+    // --- AUTO CLEAR HISTORY EVENT (Updated) ---
+    socket.on("history_cleared", () => {
+        // Create a local system message
+        const systemMsg = {
+            id: "system-clear-" + Date.now(),
+            isSystem: true, // Special flag for rendering
+            message: "♻️ Old chat history deleted (Limit reached)",
+            time: new Date().toISOString()
+        };
+        
+        // Wipe all previous messages and start with this system message
+        setMessageList([systemMsg]);
+        setHasMoreMessages(false); // Reset pagination since DB is empty
+        
+        toast("Chat history auto-cleared by server", {
+            icon: '♻️',
+            style: {
+                borderRadius: '10px',
+                background: '#333',
+                color: '#fff',
+            },
+        });
+    });
+
     socket.on("receive_message", (data) => {
       if (!data || !data.id) return;
       setMessageList((prev) => {
@@ -707,6 +731,16 @@ function ChatRoom({ username, onLogout }) {
           )}
 
           {messageList.map((msg) => {
+            
+            // --- NEW: SYSTEM MESSAGE RENDER ---
+            if (msg.isSystem) {
+                return (
+                    <div key={msg.id} className="system-message">
+                        <span>{msg.message}</span>
+                    </div>
+                );
+            }
+
             const isMine = msg.socketId === socketRef.current?.id || msg.displayName === username;
             const seed = msg.displayName || msg.socketId;
             const avatarUrl = msg.avatar || `https://api.dicebear.com/7.x/notionists/svg?seed=${seed}&backgroundColor=b6e3f4,c0aede,d1d4f9`;
@@ -1027,6 +1061,28 @@ const StyleSheet = () => (
     .other .bubble { background: var(--other-bubble); color: var(--text-main); border-bottom-left-radius: 4px; }
     .meta { font-size: 10px; margin-top: 4px; opacity: 0.7; text-align: right; display: block; margin-bottom: -2px; }
     .bubble.pending { opacity:0.9; filter: brightness(0.98); }
+    
+    /* --- NEW SYSTEM MESSAGE STYLE --- */
+    .system-message {
+        width: 100%;
+        text-align: center;
+        margin: 20px 0;
+        display: flex;
+        justify-content: center;
+        animation: fadeIn 0.5s ease;
+    }
+    .system-message span {
+        background: rgba(255, 255, 255, 0.08);
+        color: #fbbf24; /* Amber-400 color for warning/notice */
+        font-size: 12px;
+        font-weight: 500;
+        padding: 6px 16px;
+        border-radius: 20px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        display: inline-flex;
+        align-items: center;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+    }
 
     /* --- ACTION BUTTONS (REPLY & REACT) --- */
     .action-btns-group {
