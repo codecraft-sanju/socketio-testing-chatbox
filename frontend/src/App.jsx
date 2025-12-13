@@ -331,7 +331,10 @@ function ChatInterface({ username, onLogout }) {
     }, 1200);
   };
 
-  const sendMessage = () => {
+  const sendMessage = (e) => {
+    // 1. Prevent Default to stop button from causing focus loss
+    if (e) e.preventDefault(); 
+
     if (!message.trim() || !socketRef.current) return;
     const id = generateId();
     const msgData = {
@@ -354,7 +357,11 @@ function ChatInterface({ username, onLogout }) {
     socketRef.current.emit("typing", { typing: false });
     setMessage("");
     setReplyingTo(null);
-    inputRef.current?.focus();
+    
+    // 2. FORCE FOCUS BACK TO INPUT (Keeps keyboard open)
+    setTimeout(() => {
+        inputRef.current?.focus();
+    }, 10);
   };
 
   const handleFilesSelected = async (e) => {
@@ -633,10 +640,14 @@ function ChatInterface({ username, onLogout }) {
                     placeholder="Type a message..."
                     value={message}
                     onChange={(e) => { setMessage(e.target.value); handleTyping(); }}
-                    onKeyDown={(e) => { if(e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
+                    onKeyDown={(e) => { if(e.key === "Enter" && !e.shiftKey) { sendMessage(e); } }}
                  />
                  
-                 <button className={`send-btn ${message.trim() ? 'active' : ''}`} onClick={sendMessage}>
+                 <button 
+                    className={`send-btn ${message.trim() ? 'active' : ''}`} 
+                    onClick={(e) => sendMessage(e)}
+                    type="button" 
+                 >
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
                  </button>
              </div>
@@ -666,20 +677,24 @@ const StyleSheet = () => (
     }
 
     * { box-sizing: border-box; }
+    
+    /* FIX: Force 100% height and no scroll on body to fix header jumping */
     body, html { 
         margin: 0; padding: 0; 
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
         background: var(--bg-body); 
         color: var(--text-main); 
-        height: 100dvh; /* Dynamic Height for Mobile */
+        height: 100dvh; 
+        width: 100%;
         overflow: hidden; 
-        overscroll-behavior: none; /* Prevent rubber banding on mobile */
+        overscroll-behavior: none;
+        position: fixed; /* Locks the body */
     }
 
     /* --- LAYOUT GRID --- */
     .app-layout {
       display: flex;
-      height: 100dvh; /* Dynamic Height ensures correct mobile sizing */
+      height: 100dvh;
       width: 100vw;
       background: var(--bg-body);
       overflow: hidden;
@@ -767,17 +782,18 @@ const StyleSheet = () => (
       background-image: radial-gradient(#1e293b 1px, transparent 1px);
       background-size: 24px 24px;
       height: 100%;
+      width: 100%;
     }
 
+    /* FIX: Header now flex-shrink 0, so it can't be pushed out */
     .chat-header {
       height: 64px;
-      flex-shrink: 0; /* Prevents shrinking */
+      flex-shrink: 0; 
       padding: 0 20px;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      background: rgba(15, 23, 42, 0.8);
-      backdrop-filter: blur(12px);
+      background: rgba(15, 23, 42, 0.95);
       border-bottom: 1px solid var(--border);
       z-index: 10;
     }
@@ -867,7 +883,8 @@ const StyleSheet = () => (
     .emoji-picker {
         position: absolute; bottom: 100%; right: 0;
         background: var(--bg-sidebar); border: 1px solid var(--border);
-        padding: 6px; border-radius: 24px; display: flex; gap: 4px;
+        padding: 6px; border-radius: 24px; 
+        display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; /* Default desktop grid */
         box-shadow: 0 5px 15px rgba(0,0,0,0.3); z-index: 20;
         margin-bottom: 5px;
     }
@@ -888,8 +905,8 @@ const StyleSheet = () => (
         background: var(--bg-sidebar);
         border-top: 1px solid var(--border);
         display: flex; flex-direction: column; gap: 8px;
-        flex-shrink: 0; /* Ensures input doesn't shrink when keyboard opens */
-        padding-bottom: env(safe-area-inset-bottom, 16px); /* iPhone safe area */
+        flex-shrink: 0; /* Ensures input doesn't shrink */
+        padding-bottom: max(16px, env(safe-area-inset-bottom));
     }
     
     .reply-preview {
@@ -931,8 +948,8 @@ const StyleSheet = () => (
     .attach-btn { background: transparent; color: var(--text-muted); border: 1px solid transparent; }
     .attach-btn:hover { background: rgba(255,255,255,0.05); color: var(--text-main); }
     
-    .send-btn { background: var(--border); color: var(--text-muted); pointer-events: none; }
-    .send-btn.active { background: var(--primary); color: white; pointer-events: auto; }
+    .send-btn { background: var(--border); color: var(--text-muted); pointer-events: auto; } /* Changed to auto to allow click event */
+    .send-btn.active { background: var(--primary); color: white; }
     .send-btn.active:hover { background: var(--primary-hover); }
 
     /* --- LOGIN SCREEN --- */
@@ -994,14 +1011,13 @@ const StyleSheet = () => (
 
       /* Mobile Emoji Picker: Show 3 columns */
       .emoji-picker {
-         display: grid;
          grid-template-columns: repeat(3, 1fr);
          width: auto;
-         right: 0;
-         bottom: 100%;
+         right: -10px; /* Align slightly better */
+         bottom: 110%; /* Move up slightly */
          z-index: 100;
-         padding: 8px;
-         max-width: 140px;
+         padding: 10px;
+         background: var(--bg-sidebar);
       }
       .emoji-picker span {
          padding: 8px;
