@@ -1095,12 +1095,13 @@ const StyleSheet = () => (
       border: 1px solid var(--border); padding: 6px 10px;
       border-radius: 30px;
       box-shadow: 0 8px 20px var(--shadow-color);
-      display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px;
+      display: flex; /* Changed to FLEX for 1 line support */
+      gap: 5px;
       z-index: 50; animation: popIn 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
     }
     .mine .reaction-picker-popup { left: auto; right: 0; }
 
-    .emoji-item { cursor: pointer; font-size: 20px; transition: transform 0.2s; padding: 4px; border-radius: 50%; display: flex; justify-content: center; align-items: center; }
+    .emoji-item { cursor: pointer; font-size: 20px; transition: transform 0.2s; padding: 4px; border-radius: 50%; display: flex; justify-content: center; align-items: center; flex-shrink: 0; }
     .emoji-item:hover { transform: scale(1.3); background: var(--bg); }
     .emoji-item:active { transform: scale(0.9); }
 
@@ -1240,10 +1241,32 @@ const StyleSheet = () => (
       .avatar { width: 32px; height: 32px; }
       .bubble { max-width: 85%; font-size: 15px; }
       .chat-header h2 { font-size: 16px; }
-      .action-btn { width: 30px; height: 30px; font-size: 16px; }
-      .reaction-picker-popup { grid-template-columns: repeat(3, 1fr); width: 140px; top: -90px; }
-      .reply-subtitle { max-width: 250px; }
-      .modal-content { max-width: 90%; max-height: 70vh; }
+      
+      /* Better Mobile Touch Targets */
+      .action-btn { width: 36px; height: 36px; font-size: 16px; } /* Bigger touch area */
+      
+      /* Reaction Picker: 1 Line with Scroll if needed */
+      .reaction-picker-popup { 
+        width: auto; 
+        max-width: calc(100vw - 60px); /* Prevent Overflow */
+        overflow-x: auto; 
+        top: -65px; 
+        justify-content: flex-start;
+      }
+      /* Hide scrollbar for cleaner look */
+      .reaction-picker-popup::-webkit-scrollbar { display: none; }
+
+      .reply-subtitle { max-width: 200px; }
+      
+      /* Mobile Bottom Sheet Style for Modal */
+      .modal-backdrop { align-items: flex-end; }
+      .modal-content { 
+        max-width: 100%; 
+        border-radius: 20px 20px 0 0; 
+        max-height: 70vh; 
+        animation: slideUpModal 0.3s ease-out;
+      }
+      @keyframes slideUpModal { from { transform: translateY(100%); } to { transform: translateY(0); } }
     }
   `}</style>
 );
