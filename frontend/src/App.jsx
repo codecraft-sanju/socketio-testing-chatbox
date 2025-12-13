@@ -179,6 +179,7 @@ function ChatInterface({ username, onLogout }) {
   }, []);
 
   const toggleMute = () => setIsMuted((prev) => !prev);
+  
   const isUserNearBottom = () => {
     const container = messagesContainerRef.current;
     if (!container) return false;
@@ -392,7 +393,7 @@ function ChatInterface({ username, onLogout }) {
       setMessageList((prev) => prev.map((m) => m.id === tempId ? { ...m, images, _localPreview: false, loading: false } : m));
       pendingRef.current.delete(tempId);
       
-      const msgData = { ...optimisticMsg, images, _localPreview: false, loading: false, id: tempId }; // Reuse tempId for simplicity in this demo
+      const msgData = { ...optimisticMsg, images, _localPreview: false, loading: false, id: tempId };
       socketRef.current?.emit("send_message", msgData, (ack) => { if (ack && ack.id) pendingRef.current.delete(ack.id); });
     } catch (err) {
       toast.error("Image upload failed");
@@ -426,7 +427,7 @@ function ChatInterface({ username, onLogout }) {
            <button className="mobile-close-btn" onClick={() => setMobileMenuOpen(false)}>✕</button>
         </div>
         
-        {/* Search (Visual Only) */}
+        {/* Search */}
         <div className="search-wrapper">
             <input placeholder="Search users..." className="search-input" />
             <svg className="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
@@ -665,15 +666,24 @@ const StyleSheet = () => (
     }
 
     * { box-sizing: border-box; }
-    body, html { margin: 0; padding: 0; font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg-body); color: var(--text-main); height: 100%; overflow: hidden; }
+    body, html { 
+        margin: 0; padding: 0; 
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
+        background: var(--bg-body); 
+        color: var(--text-main); 
+        height: 100dvh; /* Dynamic Height for Mobile */
+        overflow: hidden; 
+        overscroll-behavior: none; /* Prevent rubber banding on mobile */
+    }
 
     /* --- LAYOUT GRID --- */
     .app-layout {
       display: flex;
-      height: 100vh;
+      height: 100dvh; /* Dynamic Height ensures correct mobile sizing */
       width: 100vw;
       background: var(--bg-body);
       overflow: hidden;
+      position: relative;
     }
 
     /* --- SIDEBAR --- */
@@ -756,10 +766,12 @@ const StyleSheet = () => (
       background: var(--bg-chat);
       background-image: radial-gradient(#1e293b 1px, transparent 1px);
       background-size: 24px 24px;
+      height: 100%;
     }
 
     .chat-header {
       height: 64px;
+      flex-shrink: 0; /* Prevents shrinking */
       padding: 0 20px;
       display: flex;
       justify-content: space-between;
@@ -876,6 +888,8 @@ const StyleSheet = () => (
         background: var(--bg-sidebar);
         border-top: 1px solid var(--border);
         display: flex; flex-direction: column; gap: 8px;
+        flex-shrink: 0; /* Ensures input doesn't shrink when keyboard opens */
+        padding-bottom: env(safe-area-inset-bottom, 16px); /* iPhone safe area */
     }
     
     .reply-preview {
@@ -922,7 +936,7 @@ const StyleSheet = () => (
     .send-btn.active:hover { background: var(--primary-hover); }
 
     /* --- LOGIN SCREEN --- */
-    .login-wrapper { width: 100vw; height: 100vh; display: flex; justify-content: center; align-items: center; background: radial-gradient(circle at top left, #1e1b4b, #0f172a); overflow: hidden; position: relative; }
+    .login-wrapper { width: 100vw; height: 100dvh; display: flex; justify-content: center; align-items: center; background: radial-gradient(circle at top left, #1e1b4b, #0f172a); overflow: hidden; position: relative; }
     .shape { position: absolute; border-radius: 50%; opacity: 0.4; filter: blur(80px); }
     .shape-1 { top: -10%; left: -10%; width: 50vw; height: 50vw; background: #4f46e5; animation: float 10s infinite alternate; }
     .shape-2 { bottom: -10%; right: -10%; width: 40vw; height: 40vw; background: #0ea5e9; animation: float 12s infinite alternate-reverse; }
@@ -977,6 +991,28 @@ const StyleSheet = () => (
       .msg-content-block { max-width: 85%; }
       .chat-header { padding: 0 15px; height: 60px; }
       .brand-logo { font-size: 20px; }
+
+      /* Mobile Emoji Picker: Show 3 columns */
+      .emoji-picker {
+         display: grid;
+         grid-template-columns: repeat(3, 1fr);
+         width: auto;
+         right: 0;
+         bottom: 100%;
+         z-index: 100;
+         padding: 8px;
+         max-width: 140px;
+      }
+      .emoji-picker span {
+         padding: 8px;
+         display: flex; justify-content: center; align-items: center;
+      }
+
+      /* Mobile Input Area */
+      .chat-input-area {
+        padding: 12px;
+        padding-bottom: max(12px, env(safe-area-inset-bottom));
+      }
     }
     @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
   `}</style>
