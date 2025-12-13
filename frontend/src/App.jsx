@@ -412,6 +412,15 @@ function ChatRoom({ username, onLogout }) {
   const sendMessage = () => {
     if (!message.trim() || !socketRef.current) return;
     const id = generateId();
+
+    // --- FIX: Logic to handle replies to images (no text) ---
+    const replyPayload = replyingTo ? {
+      id: replyingTo.id,
+      displayName: replyingTo.displayName,
+      // If message text exists, use it. If not, but images exist, say "📷 Photo"
+      message: replyingTo.message || (replyingTo.images && replyingTo.images.length > 0 ? "📷 Photo" : "Attachment")
+    } : null;
+
     const msgData = {
       id,
       message: message.trim(),
@@ -420,11 +429,7 @@ function ChatRoom({ username, onLogout }) {
       displayName: clientDisplayName.current,
       avatar: `https://api.dicebear.com/7.x/notionists/svg?seed=${clientDisplayName.current}&backgroundColor=b6e3f4,c0aede,d1d4f9`,
       reactions: {},
-      replyTo: replyingTo ? {
-        id: replyingTo.id,
-        displayName: replyingTo.displayName,
-        message: replyingTo.message
-      } : null,
+      replyTo: replyPayload,
       images: []
     };
 
@@ -465,6 +470,13 @@ function ChatRoom({ username, onLogout }) {
     const tempId = generateId();
     const localPreviews = limited.map((f) => ({ url: URL.createObjectURL(f), name: f.name, local: true }));
 
+    // --- FIX: Logic to handle replies to images inside Upload Flow ---
+    const replyPayload = replyingTo ? {
+        id: replyingTo.id,
+        displayName: replyingTo.displayName,
+        message: replyingTo.message || (replyingTo.images && replyingTo.images.length > 0 ? "📷 Photo" : "Attachment")
+    } : null;
+
     const optimisticMsg = {
       id: tempId,
       message: "",
@@ -473,11 +485,7 @@ function ChatRoom({ username, onLogout }) {
       displayName: clientDisplayName.current,
       avatar: `https://api.dicebear.com/7.x/notionists/svg?seed=${clientDisplayName.current}&backgroundColor=b6e3f4,c0aede,d1d4f9`,
       reactions: {},
-      replyTo: replyingTo ? {
-        id: replyingTo.id,
-        displayName: replyingTo.displayName,
-        message: replyingTo.message
-      } : null,
+      replyTo: replyPayload,
       images: localPreviews,
       _localPreview: true,
       loading: true
@@ -523,11 +531,7 @@ function ChatRoom({ username, onLogout }) {
         displayName: clientDisplayName.current,
         avatar: `https://api.dicebear.com/7.x/notionists/svg?seed=${clientDisplayName.current}&backgroundColor=b6e3f4,c0aede,d1d4f9`,
         reactions: {},
-        replyTo: replyingTo ? {
-          id: replyingTo.id,
-          displayName: replyingTo.displayName,
-          message: replyingTo.message
-        } : null,
+        replyTo: replyPayload,
         images: images 
       };
 
@@ -811,7 +815,10 @@ function ChatRoom({ username, onLogout }) {
             <div className="reply-preview-bar">
               <div className="reply-info">
                 <span className="reply-title">Replying to {replyingTo.displayName}</span>
-                <span className="reply-subtitle">{replyingTo.message}</span>
+                {/* --- FIX: Display "📷 Photo" if message is empty but has images --- */}
+                <span className="reply-subtitle">
+                    {replyingTo.message || (replyingTo.images && replyingTo.images.length > 0 ? "📷 Photo" : "")}
+                </span>
               </div>
               <button className="close-reply-btn" onClick={() => setReplyingTo(null)}>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
