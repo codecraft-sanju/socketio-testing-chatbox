@@ -390,7 +390,7 @@ function ChatRoom({ username, onLogout }) {
     if (!isLoadingMore && !loadingHistory) {
          if (isUserNearBottom()) {
              setTimeout(() => {
-                try { messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); } catch (e) {}
+               try { messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); } catch (e) {}
              }, 80);
          }
     }
@@ -413,12 +413,14 @@ function ChatRoom({ username, onLogout }) {
     if (!message.trim() || !socketRef.current) return;
     const id = generateId();
 
-    // --- FIX: Logic to handle replies to images (no text) ---
+    // --- FIX: Logic to handle replies to images with VISUAL IMAGE ---
     const replyPayload = replyingTo ? {
       id: replyingTo.id,
       displayName: replyingTo.displayName,
-      // If message text exists, use it. If not, but images exist, say "📷 Photo"
-      message: replyingTo.message || (replyingTo.images && replyingTo.images.length > 0 ? "📷 Photo" : "Attachment")
+      // Use text if exists, otherwise "Photo"
+      message: replyingTo.message || (replyingTo.images && replyingTo.images.length > 0 ? "📷 Photo" : "Attachment"),
+      // Capture the image URL so we can show it in the bubble
+      replyImage: (replyingTo.images && replyingTo.images.length > 0) ? replyingTo.images[0].url : null
     } : null;
 
     const msgData = {
@@ -474,7 +476,9 @@ function ChatRoom({ username, onLogout }) {
     const replyPayload = replyingTo ? {
         id: replyingTo.id,
         displayName: replyingTo.displayName,
-        message: replyingTo.message || (replyingTo.images && replyingTo.images.length > 0 ? "📷 Photo" : "Attachment")
+        message: replyingTo.message || (replyingTo.images && replyingTo.images.length > 0 ? "📷 Photo" : "Attachment"),
+        // Capture image for reply
+        replyImage: (replyingTo.images && replyingTo.images.length > 0) ? replyingTo.images[0].url : null
     } : null;
 
     const optimisticMsg = {
@@ -729,7 +733,17 @@ function ChatRoom({ username, onLogout }) {
                   {msg.replyTo && (
                     <div className="reply-quote-in-bubble">
                       <span className="reply-to-name">{msg.replyTo.displayName}</span>
-                      <div className="reply-to-text">{msg.replyTo.message}</div>
+                      <div className="reply-quote-content">
+                        {/* --- RENDER IMAGE IN BUBBLE REPLY --- */}
+                        {msg.replyTo.replyImage && (
+                          <img 
+                            src={msg.replyTo.replyImage} 
+                            alt="Reply Thumb" 
+                            className="reply-thumb-bubble"
+                          />
+                        )}
+                        <div className="reply-to-text">{msg.replyTo.message}</div>
+                      </div>
                     </div>
                   )}
 
@@ -815,10 +829,19 @@ function ChatRoom({ username, onLogout }) {
             <div className="reply-preview-bar">
               <div className="reply-info">
                 <span className="reply-title">Replying to {replyingTo.displayName}</span>
-                {/* --- FIX: Display "📷 Photo" if message is empty but has images --- */}
-                <span className="reply-subtitle">
-                    {replyingTo.message || (replyingTo.images && replyingTo.images.length > 0 ? "📷 Photo" : "")}
-                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {/* --- SHOW THUMBNAIL IN PREVIEW --- */}
+                  {replyingTo.images && replyingTo.images.length > 0 && (
+                    <img 
+                      src={replyingTo.images[0].url} 
+                      className="reply-thumb" 
+                      alt="thumb" 
+                    />
+                  )}
+                  <span className="reply-subtitle">
+                      {replyingTo.message || (replyingTo.images && replyingTo.images.length > 0 ? "📷 Photo" : "")}
+                  </span>
+                </div>
               </div>
               <button className="close-reply-btn" onClick={() => setReplyingTo(null)}>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
@@ -1040,7 +1063,12 @@ const StyleSheet = () => (
     }
     .mine .reply-quote-in-bubble { background: rgba(0,0,0,0.15); border-left-color: rgba(255,255,255,0.6); }
     .reply-to-name { font-weight: 700; opacity: 0.9; font-size: 11px; }
+    .reply-quote-content { display: flex; align-items: center; gap: 8px; }
     .reply-to-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0.8; max-width: 200px; }
+    
+    /* New styles for reply thumb in bubble and footer */
+    .reply-thumb-bubble { width: 32px; height: 32px; border-radius: 4px; object-fit: cover; flex-shrink: 0; }
+    .reply-thumb { width: 36px; height: 36px; border-radius: 6px; object-fit: cover; border: 1px solid var(--border); }
 
     /* --- REPLY PREVIEW BAR --- */
     .reply-preview-bar {
@@ -1051,8 +1079,8 @@ const StyleSheet = () => (
       animation: slideUp 0.2s ease-out;
       transition: background 0.3s, border-color 0.3s;
     }
-    .reply-info { display: flex; flex-direction: column; font-size: 13px; overflow: hidden; }
-    .reply-title { font-weight: 700; color: var(--primary); margin-bottom: 2px; }
+    .reply-info { display: flex; flex-direction: column; font-size: 13px; overflow: hidden; gap: 4px; }
+    .reply-title { font-weight: 700; color: var(--primary); margin-bottom: 0px; }
     .reply-subtitle { color: var(--text-sub); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 80vw; }
     .close-reply-btn { background: none; border: none; cursor: pointer; color: var(--text-sub); padding: 4px; display: flex; align-items: center; }
     .close-reply-btn:hover { color: #ef4444; background: rgba(239, 68, 68, 0.1); border-radius: 50%; }
